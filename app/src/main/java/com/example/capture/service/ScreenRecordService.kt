@@ -30,6 +30,7 @@ import androidx.core.app.NotificationCompat
 import com.example.capture.MainActivity
 import com.example.capture.PermissionActivity
 import com.example.capture.R
+import com.example.capture.view.FloatingView
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -72,6 +73,12 @@ class ScreenRecordService : Service() {
     }
     
     private val binder = LocalBinder()
+    private var floatingView: FloatingView? = null
+    
+    fun setFloatingView(view: FloatingView?) {
+        floatingView = view
+    }
+    
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaRecorder: MediaRecorder? = null
@@ -94,24 +101,8 @@ class ScreenRecordService : Service() {
     }
     
     private fun requestMediaProjectionPermission() {
-        val activity = activityRef?.get()
-        if (activity == null) {
-            Log.w(TAG, "Activity is null, cannot request permission directly")
-            openMainActivityForPermission()
-            return
-        }
-        
-        pendingStartRecording = true
-        
-        val mediaProjectionManager = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val intent = mediaProjectionManager.createScreenCaptureIntent()
-        
-        try {
-            activity.startActivityForResult(intent, 1001)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting activity: ${e.message}")
-            openMainActivityForPermission()
-        }
+        Log.d(TAG, "Opening PermissionActivity for permission request")
+        openMainActivityForPermission()
     }
     
     private fun openMainActivityForPermission() {
@@ -233,6 +224,45 @@ class ScreenRecordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand called with action: ${intent?.action}")
+        
+        if (intent?.action == ACTION_START) {
+            val resultCode = PermissionActivity.pendingResultCode
+            val data = PermissionActivity.pendingData
+            
+            Log.d(TAG, "Reading from static: resultCode=$resultCode, data=${data != null}")
+            
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                saveProjectionData(resultCode, data)
+                startRecordingInternal(resultCode, data)
+                
+                // 显示 FloatingView
+                showFloatingView()
+                
+                // 清除静态变量
+                PermissionActivity.pendingResultCode = -1
+                PermissionActivity.pendingData = null
+            }
+        }
+        
+        return START_STICKY
+    }
+    
+    private fun showFloatingView() {
+        try {
+            if (floatingView == null) {
+                floatingView = FloatingView(this)
+            }
+            floatingView?.setService(this)
+            floatingView?.isRecording = true
+            floatingView?.show()
+            Log.d(TAG, "FloatingView shown from Service")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing FloatingView: ${e.message}")
+        }
+    }
+    
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()

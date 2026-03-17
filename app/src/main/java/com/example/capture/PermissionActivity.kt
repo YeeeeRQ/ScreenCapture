@@ -13,6 +13,9 @@ class PermissionActivity : Activity() {
     
     companion object {
         private const val TAG = "PermissionActivity"
+        
+        var pendingResultCode: Int = -1
+        var pendingData: Intent? = null
     }
     
     private val handler = Handler(Looper.getMainLooper())
@@ -36,22 +39,24 @@ class PermissionActivity : Activity() {
         
         if (requestCode == 1001) {
             if (resultCode == Activity.RESULT_OK && data != null) {
-                Log.d(TAG, "Permission granted")
+                Log.d(TAG, "Permission granted, resultCode=$resultCode")
+                
+                // 保存到静态变量，供 Service 读取
+                pendingResultCode = resultCode
+                pendingData = data
                 
                 // 启动录制服务
                 val serviceIntent = Intent(this, ScreenRecordService::class.java).apply {
                     action = ScreenRecordService.ACTION_START
-                    putExtra("result_code", resultCode)
-                    putExtra("data", data)
                 }
                 startForegroundService(serviceIntent)
             } else {
                 Log.d(TAG, "Permission denied")
             }
             
-            // 延迟一点关闭，让服务有时间启动
+            // 延迟一点关闭，让服务有时间启动，然后使用 finishAffinity 确保不恢复之前的 Activity
             handler.postDelayed({
-                finish()
+                finishAffinity()
             }, 500)
         }
     }

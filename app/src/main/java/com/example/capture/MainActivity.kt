@@ -127,6 +127,9 @@ class MainActivity : ComponentActivity() {
                 floatingView?.setService(screenRecordService)
                 floatingView?.isRecording = isRecording
                 floatingView?.show()
+                
+                // 将 FloatingView 传递给 Service
+                screenRecordService?.setFloatingView(floatingView)
             }
             
             handler.post(updateTimeRunnable)
