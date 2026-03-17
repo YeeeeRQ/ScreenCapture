@@ -199,7 +199,7 @@ class ScreenRecordService : Service() {
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
             
-            val openIntent = Intent(this, MainActivity::class.java).apply {
+            val openIntent = Intent(this, PermissionActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             val pendingIntent = PendingIntent.getActivity(
@@ -209,7 +209,7 @@ class ScreenRecordService : Service() {
             
             val notification = NotificationCompat.Builder(this, "floating_channel")
                 .setContentTitle("需要获取权限")
-                .setContentText("请先打开应用获取录制权限")
+                .setContentText("点击开始屏幕录制")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
@@ -262,7 +262,7 @@ class ScreenRecordService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val openIntent = Intent(this, MainActivity::class.java)
+        val openIntent = Intent(this, PermissionActivity::class.java)
         val openPendingIntent = PendingIntent.getActivity(
             this,
             0,

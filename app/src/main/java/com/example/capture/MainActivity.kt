@@ -211,12 +211,8 @@ class MainActivity : ComponentActivity() {
                 Log.d("ScreenRecord", "Requesting MediaProjection permission (from floating window)...")
                 requestMediaProjection(permissionOnly = false)
             }, 300)
-        } else {
-            Handler(Looper.getMainLooper()).postDelayed({
-                Log.d("ScreenRecord", "Auto requesting MediaProjection permission (permission only)...")
-                requestMediaProjection(permissionOnly = true)
-            }, 500)
         }
+        // Auto-request permission removed - user can manually request from UI
         
         setContent {
             CaptureTheme {
