@@ -16,10 +16,24 @@ import android.widget.TextView
 import com.example.capture.R
 import com.example.capture.service.ScreenRecordService
 
-class FloatingView(private val context: Context) : ScreenRecordService.RecordingCallback {
+class FloatingView private constructor(private val context: Context) : ScreenRecordService.RecordingCallback {
     
     companion object {
         private const val TAG = "FloatingView"
+        
+        @Volatile
+        private var instance: FloatingView? = null
+        
+        fun getInstance(context: Context): FloatingView {
+            return instance ?: synchronized(this) {
+                instance ?: FloatingView(context).also { instance = it }
+            }
+        }
+        
+        fun release() {
+            instance?.hide()
+            instance = null
+        }
     }
     
     private var windowManager: WindowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -33,6 +47,10 @@ class FloatingView(private val context: Context) : ScreenRecordService.Recording
     private var timeUpdateHandler: Handler? = null
     private var timeUpdateRunnable: Runnable? = null
     private var recordingStartTime: Long = 0
+    
+    private val prefs by lazy {
+        context.getSharedPreferences("floating_view_prefs", Context.MODE_PRIVATE)
+    }
     
     private var initialX: Int = 0
     private var initialY: Int = 0
@@ -108,6 +126,10 @@ class FloatingView(private val context: Context) : ScreenRecordService.Recording
         floatingImage = floatingView?.findViewById(R.id.floating_image)
         floatingTimeText = floatingView?.findViewById(R.id.floating_time)
         
+        // 读取保存的位置，如果没有保存则使用默认值
+        val savedX = prefs.getInt("position_x", 100)
+        val savedY = prefs.getInt("position_y", 300)
+        
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -116,8 +138,8 @@ class FloatingView(private val context: Context) : ScreenRecordService.Recording
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 300
+            x = savedX
+            y = savedY
         }
         
         floatingView?.setOnTouchListener(touchListener)
@@ -178,6 +200,15 @@ class FloatingView(private val context: Context) : ScreenRecordService.Recording
                 val deltaX = Math.abs(event.rawX - initialTouchX)
                 val deltaY = Math.abs(event.rawY - initialTouchY)
                 Log.d(TAG, "ACTION_UP: deltaX=$deltaX, deltaY=$deltaY, lastAction=$lastAction")
+                
+                // 保存位置
+                params?.let {
+                    prefs.edit()
+                        .putInt("position_x", it.x)
+                        .putInt("position_y", it.y)
+                        .apply()
+                }
+                
                 if (deltaX < 30 && deltaY < 30) {
                     if (screenRecordService != null) {
                         Log.d(TAG, "Calling toggleRecording!")

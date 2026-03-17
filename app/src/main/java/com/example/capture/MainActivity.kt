@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -121,9 +122,7 @@ class MainActivity : ComponentActivity() {
             }
             
             if (floatingWindowEnabled) {
-                if (floatingView == null) {
-                    floatingView = FloatingView(this@MainActivity)
-                }
+                floatingView = FloatingView.getInstance(this@MainActivity)
                 floatingView?.setService(screenRecordService)
                 floatingView?.isRecording = isRecording
                 floatingView?.show()
@@ -192,6 +191,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
+        // 使状态栏和导航栏透明
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS,
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
+        )
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+        )
+        
         registerReceiver(permissionRequestReceiver, android.content.IntentFilter("com.example.capture.REQUEST_PERMISSION"), android.content.Context.RECEIVER_NOT_EXPORTED)
         
         Log.i("ScreenRecord", "========== App Started ==========")
@@ -232,9 +241,7 @@ class MainActivity : ComponentActivity() {
                         onFloatingWindowToggle = { enabled ->
                             floatingWindowEnabled = enabled
                             if (enabled) {
-                                if (floatingView == null) {
-                                    floatingView = FloatingView(this)
-                                }
+                                floatingView = FloatingView.getInstance(this)
                                 floatingView?.setService(screenRecordService)
                                 floatingView?.isRecording = isRecording
                                 floatingView?.show()
@@ -332,10 +339,8 @@ class MainActivity : ComponentActivity() {
         screenRecordService?.saveProjectionData(resultCode, data)
         
         if (floatingWindowEnabled) {
-            if (floatingView == null) {
-                floatingView = FloatingView(this).apply {
-                    setService(screenRecordService)
-                }
+            floatingView = FloatingView.getInstance(this).apply {
+                setService(screenRecordService)
             }
             floatingView?.isRecording = true
             floatingView?.show()

@@ -251,9 +251,11 @@ class ScreenRecordService : Service() {
     
     private fun showFloatingView() {
         try {
-            if (floatingView == null) {
-                floatingView = FloatingView(this)
-            }
+            // 先隐藏并释放旧的实例
+            FloatingView.release()
+            
+            // 创建新的单例实例
+            floatingView = FloatingView.getInstance(this)
             floatingView?.setService(this)
             floatingView?.isRecording = true
             floatingView?.show()
