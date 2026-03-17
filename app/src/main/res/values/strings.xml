@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">屏幕录制</string>
+    <string name="notification_channel_name">屏幕录制</string>
+    <string name="notification_channel_description">显示屏幕录制状态通知</string>
+    <string name="recording_title">屏幕录制中</string>
+    <string name="recording_text">点击停止录制</string>
+    <string name="recording_in_progress">录制时长:</string>
+    <string name="stop_recording">停止</string>
+    <string name="record_button">录制按钮</string>
+</resources>
