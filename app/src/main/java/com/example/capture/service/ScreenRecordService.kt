@@ -28,6 +28,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import com.example.capture.MainActivity
+import com.example.capture.PermissionActivity
 import com.example.capture.R
 import java.io.File
 import java.io.FileInputStream
@@ -116,19 +117,14 @@ class ScreenRecordService : Service() {
     private fun openMainActivityForPermission() {
         try {
             val context = activityRef?.get() ?: applicationContext
-            context.getSharedPreferences("screen_record_prefs", Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean("from_floating_window", true)
-                .apply()
             
-            val intent = Intent(context, MainActivity::class.java).apply {
+            val intent = Intent(context, PermissionActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("request_permission", true)
             }
             context.startActivity(intent)
-            Log.d(TAG, "Opened MainActivity for permission request")
+            Log.d(TAG, "Opened PermissionActivity for permission request")
         } catch (e: Exception) {
-            Log.e(TAG, "Cannot open MainActivity: ${e.message}")
+            Log.e(TAG, "Cannot open PermissionActivity: ${e.message}")
             showNoPermissionNotification()
         }
     }
