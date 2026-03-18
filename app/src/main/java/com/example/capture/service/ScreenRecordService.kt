@@ -9,11 +9,24 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLSurface
+import android.opengl.GLES11Ext
+import android.opengl.GLES20
 import android.os.Binder
 import android.os.Build
 import android.os.Environment
@@ -23,6 +36,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +47,8 @@ import com.example.capture.R
 import com.example.capture.view.FloatingView
 import java.io.File
 import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
 
@@ -84,6 +100,423 @@ class ScreenRecordService : Service() {
     private var mediaRecorder: MediaRecorder? = null
     private var isRecording = false
     private var outputFile: File? = null
+    
+    // MediaCodec for video encoding
+    private var mediaCodec: MediaCodec? = null
+    private var mediaMuxer: MediaMuxer? = null
+    private var encoderSurface: Surface? = null
+    private var videoTrackIndex = -1
+    private var muxerStarted = false
+    
+    // OpenGL ES for screenshot
+    private var surfaceTexture: SurfaceTexture? = null
+    private var textureId: Int = 0
+    private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
+    private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
+    private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var screenWidth: Int = 0
+    private var screenHeight: Int = 0
+    private var screenDensity: Int = 0
+    
+    // Render thread
+    private var renderThread: Thread? = null
+    private var isRendering = false
+    
+    // Screenshot sync
+    private val snapshotLock = Object()
+    private var needSnapshot = false
+    private var pendingSnapshot: Bitmap? = null
+    
+    // Shader and FBO
+    private var shaderProgram: Int = 0
+    private var fboId: Int = 0
+    private var fboTextureId: Int = 0
+    private var vertexBuffer: java.nio.FloatBuffer? = null
+    private var texCoordBuffer: java.nio.FloatBuffer? = null
+    
+    // Shader code
+    private val vertexShaderCode = """
+        attribute vec4 aPosition;
+        attribute vec2 aTextureCoord;
+        varying vec2 vTextureCoord;
+        void main() {
+            gl_Position = aPosition;
+            vTextureCoord = aTextureCoord;
+        }
+    """.trimIndent()
+    
+    private val fragmentShaderCode = """
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 vTextureCoord;
+        uniform samplerExternalOES sTexture;
+        void main() {
+            gl_FragColor = texture2D(sTexture, vTextureCoord);
+        }
+    """.trimIndent()
+    
+    // ============ EGL Methods ============
+    
+    private fun initEGLWithEncoder(): Boolean {
+        try {
+            eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+            if (eglDisplay == EGL14.EGL_NO_DISPLAY) {
+                Log.e(TAG, "Unable to get EGL display")
+                return false
+            }
+            
+            val version = IntArray(2)
+            if (!EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) {
+                Log.e(TAG, "Unable to initialize EGL")
+                return false
+            }
+            
+            val configAttribs = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
+                EGL14.EGL_NONE
+            )
+            
+            val configs = arrayOfNulls<EGLConfig>(1)
+            val numConfigs = IntArray(1)
+            if (!EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0)) {
+                Log.e(TAG, "Unable to choose EGL config")
+                return false
+            }
+            
+            val contextAttribs = intArrayOf(
+                EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
+                EGL14.EGL_NONE
+            )
+            eglContext = EGL14.eglCreateContext(eglDisplay, configs[0], EGL14.EGL_NO_CONTEXT, contextAttribs, 0)
+            if (eglContext == EGL14.EGL_NO_CONTEXT) {
+                Log.e(TAG, "Unable to create EGL context")
+                return false
+            }
+            
+            val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
+            eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, configs[0], encoderSurface, surfaceAttribs, 0)
+            if (eglSurface == EGL14.EGL_NO_SURFACE) {
+                Log.e(TAG, "Unable to create EGL window surface")
+                return false
+            }
+            
+            if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+                Log.e(TAG, "Unable to make EGL context current")
+                return false
+            }
+            
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            
+            Log.d(TAG, "EGL with encoder initialized")
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "EGL init error: ${e.message}")
+            return false
+        }
+    }
+    
+    private fun releaseEGL() {
+        try {
+            if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
+                EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglDestroySurface(eglDisplay, eglSurface)
+                }
+                if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                    EGL14.eglDestroyContext(eglDisplay, eglContext)
+                }
+                EGL14.eglTerminate(eglDisplay)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "EGL release error: ${e.message}")
+        }
+        eglDisplay = EGL14.EGL_NO_DISPLAY
+        eglContext = EGL14.EGL_NO_CONTEXT
+        eglSurface = EGL14.EGL_NO_SURFACE
+    }
+    
+    // ============ Shader Methods ============
+    
+    private fun createShader(type: Int, code: String): Int {
+        val shader = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(shader, code)
+        GLES20.glCompileShader(shader)
+        
+        val compiled = IntArray(1)
+        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0)
+        if (compiled[0] == 0) {
+            Log.e(TAG, "Shader compile error: ${GLES20.glGetShaderInfoLog(shader)}")
+            GLES20.glDeleteShader(shader)
+            return 0
+        }
+        return shader
+    }
+    
+    private fun createProgram(vertexCode: String, fragmentCode: String): Int {
+        val vertexShader = createShader(GLES20.GL_VERTEX_SHADER, vertexCode)
+        val fragmentShader = createShader(GLES20.GL_FRAGMENT_SHADER, fragmentCode)
+        
+        val program = GLES20.glCreateProgram()
+        GLES20.glAttachShader(program, vertexShader)
+        GLES20.glAttachShader(program, fragmentShader)
+        GLES20.glLinkProgram(program)
+        
+        val linked = IntArray(1)
+        GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linked, 0)
+        if (linked[0] == 0) {
+            Log.e(TAG, "Program link error: ${GLES20.glGetProgramInfoLog(program)}")
+            return 0
+        }
+        
+        GLES20.glDeleteShader(vertexShader)
+        GLES20.glDeleteShader(fragmentShader)
+        
+        return program
+    }
+    
+    private fun setupGeometry() {
+        val vertices = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+        val texCoords = floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
+        
+        vertexBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .put(vertices)
+        vertexBuffer?.position(0)
+        
+        texCoordBuffer = ByteBuffer.allocateDirect(texCoords.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .put(texCoords)
+        texCoordBuffer?.position(0)
+    }
+    
+    private fun drawTexture(texId: Int) {
+        GLES20.glUseProgram(shaderProgram)
+        
+        val positionHandle = GLES20.glGetAttribLocation(shaderProgram, "aPosition")
+        val texCoordHandle = GLES20.glGetAttribLocation(shaderProgram, "aTextureCoord")
+        val textureHandle = GLES20.glGetUniformLocation(shaderProgram, "sTexture")
+        
+        vertexBuffer?.position(0)
+        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(positionHandle)
+        
+        texCoordBuffer?.position(0)
+        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer)
+        GLES20.glEnableVertexAttribArray(texCoordHandle)
+        
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
+        GLES20.glUniform1i(textureHandle, 0)
+        
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        
+        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisableVertexAttribArray(texCoordHandle)
+    }
+    
+    // ============ FBO Methods ============
+    
+    private fun createFBO() {
+        val fboIds = IntArray(1)
+        GLES20.glGenFramebuffers(1, fboIds, 0)
+        fboId = fboIds[0]
+        
+        val texIds = IntArray(1)
+        GLES20.glGenTextures(1, texIds, 0)
+        fboTextureId = texIds[0]
+        
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTextureId)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, screenWidth, screenHeight, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboId)
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, fboTextureId, 0)
+        
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.e(TAG, "FBO not complete: $status")
+        }
+        
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        Log.d(TAG, "FBO created: fboId=$fboId")
+    }
+    
+    private fun releaseFBO() {
+        if (fboId != 0) {
+            val fboIds = intArrayOf(fboId)
+            GLES20.glDeleteFramebuffers(1, fboIds, 0)
+            fboId = 0
+        }
+        if (fboTextureId != 0) {
+            val texIds = intArrayOf(fboTextureId)
+            GLES20.glDeleteTextures(1, texIds, 0)
+            fboTextureId = 0
+        }
+    }
+    
+    private fun captureSnapshot(): Bitmap? {
+        try {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboId)
+            GLES20.glViewport(0, 0, screenWidth, screenHeight)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            
+            drawTexture(textureId)
+            
+            val buffer = ByteBuffer.allocateDirect(screenWidth * screenHeight * 4)
+            buffer.order(ByteOrder.LITTLE_ENDIAN)
+            GLES20.glReadPixels(0, 0, screenWidth, screenHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
+            
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            
+            buffer.rewind()
+            val bitmap = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
+            bitmap.copyPixelsFromBuffer(buffer)
+            
+            val matrix = android.graphics.Matrix()
+            matrix.preScale(1f, -1f)
+            val flipped = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight, matrix, true)
+            bitmap.recycle()
+            
+            return flipped
+        } catch (e: Exception) {
+            Log.e(TAG, "captureSnapshot error: ${e.message}")
+            return null
+        }
+    }
+    
+    private fun saveBitmapToMediaStore(bitmap: Bitmap): Boolean {
+        return try {
+            val filename = "Screen_${System.currentTimeMillis()}.png"
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ScreenRecord")
+            }
+            
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            uri?.let {
+                contentResolver.openOutputStream(it)?.use { os ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+                }
+                Log.d(TAG, "Screenshot saved: $uri")
+                true
+            } ?: false
+        } catch (e: Exception) {
+            Log.e(TAG, "Save bitmap error: ${e.message}")
+            false
+        }
+    }
+    
+    // ============ Render Thread ============
+    
+    private fun startRenderThread() {
+        renderThread = Thread {
+            try {
+                Log.d(TAG, "Render thread starting...")
+                
+                if (!initEGLWithEncoder()) {
+                    Log.e(TAG, "Failed to init EGL")
+                    return@Thread
+                }
+                
+                shaderProgram = createProgram(vertexShaderCode, fragmentShaderCode)
+                if (shaderProgram == 0) {
+                    Log.e(TAG, "Failed to create shader")
+                    return@Thread
+                }
+                
+                setupGeometry()
+                createFBO()
+                
+                isRendering = true
+                Log.d(TAG, "Render thread ready")
+                
+                while (isRecording && !Thread.interrupted()) {
+                    try {
+                        surfaceTexture?.updateTexImage()
+                        
+                        drawToEncoder()
+                        
+                        synchronized(snapshotLock) {
+                            if (needSnapshot && pendingSnapshot == null) {
+                                pendingSnapshot = captureSnapshot()
+                                needSnapshot = false
+                            }
+                        }
+                        
+                        drainEncoder()
+                        Thread.sleep(33)
+                    } catch (e: Exception) {
+                        if (isRecording) Log.e(TAG, "Render error: ${e.message}")
+                    }
+                }
+                
+                Log.d(TAG, "Render thread exiting")
+            } catch (e: Exception) {
+                Log.e(TAG, "Render thread error: ${e.message}")
+            }
+        }
+        renderThread?.start()
+    }
+    
+    private fun drawToEncoder() {
+        try {
+            EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+            GLES20.glViewport(0, 0, screenWidth, screenHeight)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            drawTexture(textureId)
+            EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        } catch (e: Exception) {
+            Log.e(TAG, "drawToEncoder error: ${e.message}")
+        }
+    }
+    
+    private fun drainEncoder() {
+        val bufferInfo = MediaCodec.BufferInfo()
+        while (true) {
+            val idx = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0) ?: break
+            when {
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> break
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    val fmt = mediaCodec?.outputFormat
+                    Log.d(TAG, "Encoder format: $fmt")
+                    videoTrackIndex = mediaMuxer?.addTrack(fmt!!) ?: -1
+                    mediaMuxer?.start()
+                    muxerStarted = true
+                }
+                idx >= 0 -> {
+                    val data = mediaCodec?.getOutputBuffer(idx)
+                    if (muxerStarted && bufferInfo.size > 0 && data != null) {
+                        data.position(bufferInfo.offset)
+                        data.limit(bufferInfo.offset + bufferInfo.size)
+                        try {
+                            mediaMuxer?.writeSampleData(videoTrackIndex, data, bufferInfo)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "writeSampleData error: ${e.message}")
+                        }
+                    }
+                    mediaCodec?.releaseOutputBuffer(idx, false)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                }
+            }
+        }
+    }
     
     private val handler = Handler(Looper.getMainLooper())
     private var recordingStartTime: Long = 0
@@ -212,6 +645,47 @@ class ScreenRecordService : Service() {
         }
     }
 
+    fun takeScreenshot(): Boolean {
+        if (!isRecording) {
+            Log.w(TAG, "Cannot take screenshot: not recording")
+            return false
+        }
+        
+        Log.d(TAG, "Taking screenshot...")
+        
+        synchronized(snapshotLock) {
+            needSnapshot = true
+            pendingSnapshot = null
+        }
+        
+        var waitCount = 0
+        while (waitCount < 50) {
+            Thread.sleep(10)
+            synchronized(snapshotLock) {
+                if (pendingSnapshot != null) {
+                    val bitmap = pendingSnapshot
+                    pendingSnapshot = null
+                    
+                    if (bitmap != null) {
+                        val saved = saveBitmapToMediaStore(bitmap)
+                        if (saved) {
+                            activityRef?.get()?.runOnUiThread {
+                                android.widget.Toast.makeText(activityRef?.get(), "截图已保存", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                            bitmap.recycle()
+                            return true
+                        }
+                        bitmap.recycle()
+                    }
+                }
+            }
+            waitCount++
+        }
+        
+        Log.e(TAG, "Screenshot timeout")
+        return false
+    }
+    
     private val projectionCallback: MediaProjection.Callback = object : MediaProjection.Callback() {
         override fun onStop() {
             stopRecording()
@@ -320,7 +794,7 @@ class ScreenRecordService : Service() {
     private fun startRecordingInternal(resultCode: Int, data: Intent) {
         if (isRecording) return
 
-        Log.d(TAG, "=== startRecording called (direct) ===")
+        Log.d(TAG, "=== startRecordingInternal: MediaCodec mode ===")
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -341,130 +815,68 @@ class ScreenRecordService : Service() {
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(metrics)
         
-        val density = metrics.densityDpi
-        val width = VIDEO_WIDTH.coerceAtMost(metrics.widthPixels)
-        val height = VIDEO_HEIGHT.coerceAtMost(metrics.heightPixels)
-
-        outputFile = createOutputFile()
+        screenWidth = metrics.widthPixels
+        screenHeight = metrics.heightPixels
+        screenDensity = metrics.densityDpi
         
-        mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(this)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }.apply {
-            setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            setVideoEncodingBitRate(VIDEO_BIT_RATE)
-            setVideoFrameRate(VIDEO_FRAME_RATE)
-            setVideoSize(width, height)
-            setOutputFile(outputFile?.absolutePath)
-            
-            prepare()
-        }
-
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ScreenCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            mediaRecorder?.surface,
-            null,
-            handler
-        )
+        Log.d(TAG, "Screen: ${screenWidth}x${screenHeight}, density: $screenDensity")
 
         try {
-            mediaRecorder?.start()
+            outputFile = createOutputFile()
+            
+            mediaMuxer = MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            
+            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, screenWidth, screenHeight).apply {
+                setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_BIT_RATE)
+                setInteger(MediaFormat.KEY_FRAME_RATE, VIDEO_FRAME_RATE)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5)
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            }
+            
+            mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                encoderSurface = createInputSurface()
+                start()
+            }
+            
+            val textures = IntArray(1)
+            GLES20.glGenTextures(1, textures, 0)
+            textureId = textures[0]
+            
+            surfaceTexture = SurfaceTexture(textureId).apply {
+                setDefaultBufferSize(screenWidth, screenHeight)
+            }
+            
+            isRecording = true
+            
+            startRenderThread()
+            
+            Thread.sleep(500)
+            
+            val inputSurface = Surface(surfaceTexture)
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "ScreenCapture",
+                screenWidth,
+                screenHeight,
+                screenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                inputSurface,
+                null,
+                handler
+            )
+            
             isRecording = true
             recordingStartTime = System.currentTimeMillis()
             
             startNotificationUpdate()
             recordingCallback?.onRecordingStarted()
-        } catch (e: Exception) {
-            Log.e(TAG, "ERROR starting recording: ${e.message}")
-            recordingCallback?.onRecordingError(e.message ?: "Unknown error")
-            cleanup()
-        }
-    }
-
-    private fun startRecording(resultCode: Int, data: Intent) {
-        if (isRecording) return
-
-        Log.d(TAG, "=== startRecording called ===")
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, createNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting foreground: ${e.message}")
-        }
-
-        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-        
-        mediaProjection?.registerCallback(projectionCallback, handler)
-
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-        
-        val density = metrics.densityDpi
-        val width = VIDEO_WIDTH.coerceAtMost(metrics.widthPixels)
-        val height = VIDEO_HEIGHT.coerceAtMost(metrics.heightPixels)
-
-        Log.d(TAG, "Screen: ${metrics.widthPixels}x${metrics.heightPixels}, recording: ${width}x${height}, density: $density")
-
-        outputFile = createOutputFile()
-        
-        Log.d(TAG, "Creating MediaRecorder...")
-        mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(this)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }.apply {
-            setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            setVideoEncodingBitRate(VIDEO_BIT_RATE)
-            setVideoFrameRate(VIDEO_FRAME_RATE)
-            setVideoSize(width, height)
-            setOutputFile(outputFile?.absolutePath)
             
-            Log.d(TAG, "Calling prepare()...")
-            prepare()
-            Log.d(TAG, "prepare() success!")
-        }
-
-        Log.d(TAG, "Creating VirtualDisplay...")
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ScreenCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            mediaRecorder?.surface,
-            null,
-            handler
-        )
-
-        try {
-            Log.d(TAG, "Calling mediaRecorder.start()...")
-            mediaRecorder?.start()
-            isRecording = true
-            recordingStartTime = System.currentTimeMillis()
+            Log.d(TAG, "Recording started!")
             
-            Log.d(TAG, "Recording started successfully! StartTime: $recordingStartTime")
-            
-            startNotificationUpdate()
         } catch (e: Exception) {
             Log.e(TAG, "ERROR starting recording: ${e.message}")
             e.printStackTrace()
+            recordingCallback?.onRecordingError(e.message ?: "Unknown error")
             cleanup()
         }
     }
@@ -536,23 +948,84 @@ class ScreenRecordService : Service() {
         val tempFile = outputFile
         var savedFile: File? = null
         
-        Log.d(TAG, "tempFile exists: ${tempFile?.exists()}, path: ${tempFile?.absolutePath}")
+        Log.d(TAG, "Stopping render thread...")
         
         try {
-            Log.d(TAG, "Calling mediaRecorder.stop()...")
-            mediaRecorder?.stop()
-            Log.d(TAG, "mediaRecorder.stop() success!")
-            mediaRecorder?.reset()
-            mediaRecorder?.release()
-            mediaRecorder = null
+            renderThread?.join(2000)
         } catch (e: Exception) {
-            Log.e(TAG, "ERROR during stop: ${e.message}")
-            e.printStackTrace()
-            outputFile?.delete()
-            outputFile = null
-            return null
+            Log.e(TAG, "Error joining render thread: ${e.message}")
         }
-
+        renderThread = null
+        isRendering = false
+        
+        try {
+            Log.d(TAG, "Signaling EOS...")
+            mediaCodec?.signalEndOfInputStream()
+            drainEncoder()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error signaling EOS: ${e.message}")
+        }
+        
+        try {
+            Log.d(TAG, "Stopping muxer...")
+            if (muxerStarted) {
+                mediaMuxer?.stop()
+            }
+            mediaMuxer?.release()
+            mediaMuxer = null
+            muxerStarted = false
+            videoTrackIndex = -1
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping muxer: ${e.message}")
+        }
+        
+        try {
+            Log.d(TAG, "Releasing encoder...")
+            mediaCodec?.stop()
+            mediaCodec?.release()
+            mediaCodec = null
+            encoderSurface?.release()
+            encoderSurface = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing encoder: ${e.message}")
+        }
+        
+        try {
+            Log.d(TAG, "Releasing VirtualDisplay...")
+            virtualDisplay?.release()
+            virtualDisplay = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing VirtualDisplay: ${e.message}")
+        }
+        
+        try {
+            Log.d(TAG, "Releasing GL resources...")
+            releaseFBO()
+            
+            if (shaderProgram != 0) {
+                GLES20.glDeleteProgram(shaderProgram)
+                shaderProgram = 0
+            }
+            
+            vertexBuffer?.clear()
+            texCoordBuffer?.clear()
+            vertexBuffer = null
+            texCoordBuffer = null
+            
+            releaseEGL()
+            
+            surfaceTexture?.release()
+            surfaceTexture = null
+            
+            if (textureId != 0) {
+                val textures = intArrayOf(textureId)
+                GLES20.glDeleteTextures(1, textures, 0)
+                textureId = 0
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing GL: ${e.message}")
+        }
+        
         Log.d(TAG, "Saving to public directory...")
         tempFile?.let { file ->
             if (file.exists()) {
@@ -563,11 +1036,6 @@ class ScreenRecordService : Service() {
             }
         }
 
-        virtualDisplay?.release()
-        virtualDisplay = null
-
-        // Only stop MediaProjection if in reauth mode
-        // In reuse mode, keep the MediaProjection for next recording
         if (recordingMode == MODE_REAUTH) {
             Log.d(TAG, "Mode REAUTH: stopping MediaProjection")
             mediaProjection?.unregisterCallback(projectionCallback)
@@ -576,7 +1044,7 @@ class ScreenRecordService : Service() {
             savedResultCode = 0
             savedData = null
         } else {
-            Log.d(TAG, "Mode REUSE: keeping MediaProjection for next recording")
+            Log.d(TAG, "Mode REUSE: keeping MediaProjection")
         }
 
         outputFile = null
@@ -636,10 +1104,45 @@ class ScreenRecordService : Service() {
     }
 
     private fun cleanup() {
+        isRecording = false
+        
+        try {
+            renderThread?.join(1000)
+        } catch (e: Exception) { }
+        renderThread = null
+        isRendering = false
+        
+        try {
+            mediaCodec?.stop()
+            mediaCodec?.release()
+            mediaCodec = null
+            encoderSurface?.release()
+            encoderSurface = null
+        } catch (e: Exception) { }
+        
+        try {
+            if (muxerStarted) {
+                mediaMuxer?.stop()
+            }
+            mediaMuxer?.release()
+            mediaMuxer = null
+            muxerStarted = false
+        } catch (e: Exception) { }
+        
         virtualDisplay?.release()
         virtualDisplay = null
-        mediaRecorder?.release()
-        mediaRecorder = null
+        
+        releaseFBO()
+        releaseEGL()
+        surfaceTexture?.release()
+        surfaceTexture = null
+        
+        if (textureId != 0) {
+            val textures = intArrayOf(textureId)
+            GLES20.glDeleteTextures(1, textures, 0)
+            textureId = 0
+        }
+        
         mediaProjection?.stop()
         mediaProjection = null
         outputFile?.delete()

@@ -18,6 +18,16 @@
         android:tint="#FFFFFF"
         android:contentDescription="@string/record_button" />
 
+    <ImageView
+        android:id="@+id/floating_screenshot"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="8dp"
+        android:src="@drawable/ic_screenshot"
+        android:tint="#FFFFFF"
+        android:visibility="gone"
+        android:contentDescription="截图" />
+
     <TextView
         android:id="@+id/floating_time"
         android:layout_width="wrap_content"

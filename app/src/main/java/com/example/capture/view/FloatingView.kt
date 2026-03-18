@@ -41,6 +41,7 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
     private var windowManager: WindowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var floatingView: View? = null
     private var floatingImage: ImageView? = null
+    private var floatingScreenshot: ImageView? = null
     private var floatingTimeText: TextView? = null
     private var params: WindowManager.LayoutParams? = null
     private var screenRecordService: ScreenRecordService? = null
@@ -126,7 +127,14 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
         floatingView = inflater.inflate(R.layout.floating_view, null)
         floatingImage = floatingView?.findViewById(R.id.floating_image)
+        floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
         floatingTimeText = floatingView?.findViewById(R.id.floating_time)
+        
+        // Screenshot button click
+        floatingScreenshot?.setOnClickListener {
+            Log.d(TAG, "Screenshot button clicked!")
+            screenRecordService?.takeScreenshot()
+        }
         
         // 读取保存的位置，如果没有保存则使用默认值
         val savedX = prefs.getInt("position_x", 100)
@@ -173,6 +181,7 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         floatingImage?.setImageResource(iconRes)
         floatingImage?.setColorFilter(Color.WHITE)
         floatingTimeText?.visibility = if (isRecording) View.VISIBLE else View.GONE
+        floatingScreenshot?.visibility = if (isRecording) View.VISIBLE else View.GONE
     }
     
     fun updateRecordingTime(timeText: String) {
