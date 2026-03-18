@@ -425,7 +425,11 @@ class ScreenRecordService : Service() {
     
     // ============ Render Thread ============
     
+    private val WARMUP_FRAMES = 15  // 预热帧数，约0.5秒 @30fps
+    private var frameCount = 0
+    
     private fun startRenderThread() {
+        frameCount = 0
         renderThread = Thread {
             try {
                 Log.d(TAG, "Render thread starting...")
@@ -445,14 +449,25 @@ class ScreenRecordService : Service() {
                 createFBO()
                 
                 isRendering = true
-                Log.d(TAG, "Render thread ready")
+                Log.d(TAG, "Render thread ready, starting render loop")
                 
                 while (isRecording && !Thread.interrupted()) {
                     try {
+                        // Update texture from SurfaceTexture
                         surfaceTexture?.updateTexImage()
                         
+                        // Skip encoding for warmup frames to ensure valid content
+                        if (frameCount < WARMUP_FRAMES) {
+                            frameCount++
+                            drainEncoder()
+                            Thread.sleep(33)
+                            continue
+                        }
+                        
+                        // Draw to encoder for recording
                         drawToEncoder()
                         
+                        // Handle screenshot request
                         synchronized(snapshotLock) {
                             if (needSnapshot && pendingSnapshot == null) {
                                 pendingSnapshot = captureSnapshot()
@@ -847,13 +862,28 @@ class ScreenRecordService : Service() {
                 setDefaultBufferSize(screenWidth, screenHeight)
             }
             
+            // Pre-warm encoder before starting VirtualDisplay
+            Log.d(TAG, "Pre-warming encoder...")
+            for (i in 1..10) {
+                try {
+                    surfaceTexture?.updateTexImage()
+                    drawToEncoder()
+                    drainEncoder()
+                    Thread.sleep(33)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Pre-warm error: ${e.message}")
+                }
+            }
+            Log.d(TAG, "Pre-warm complete")
+            
+            val inputSurface = Surface(surfaceTexture)
+            
             isRecording = true
             
             startRenderThread()
             
-            Thread.sleep(500)
+            Thread.sleep(100)
             
-            val inputSurface = Surface(surfaceTexture)
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "ScreenCapture",
                 screenWidth,
@@ -865,7 +895,6 @@ class ScreenRecordService : Service() {
                 handler
             )
             
-            isRecording = true
             recordingStartTime = System.currentTimeMillis()
             
             startNotificationUpdate()
