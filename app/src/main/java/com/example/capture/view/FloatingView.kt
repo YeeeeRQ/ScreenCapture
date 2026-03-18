@@ -133,6 +133,11 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         // Screenshot button click
         floatingScreenshot?.setOnClickListener {
             Log.d(TAG, "Screenshot button clicked!")
+            // Haptic feedback
+            floatingScreenshot?.performHapticFeedback(
+                android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+            )
             screenRecordService?.takeScreenshot()
         }
         
@@ -221,6 +226,11 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
                 }
                 
                 if (deltaX < 30 && deltaY < 30) {
+                    // Haptic feedback for record button
+                    floatingView?.performHapticFeedback(
+                        android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                    )
                     if (screenRecordService != null) {
                         Log.d(TAG, "Calling toggleRecording!")
                         screenRecordService?.toggleRecording()
