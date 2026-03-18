@@ -16,10 +16,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +86,8 @@ class MainActivity : ComponentActivity() {
     var floatingWindowEnabled by mutableStateOf(false)
         private set
     var recordingMode by mutableStateOf(SettingsManager.MODE_REAUTH)
+        private set
+    var themeMode by mutableStateOf(SettingsManager.THEME_SYSTEM)
         private set
     
     private val updateTimeRunnable = object : Runnable {
@@ -189,17 +194,22 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 先加载主题设置
+        themeMode = SettingsManager.getThemeMode(this)
+        
         enableEdgeToEdge()
         
-        // 使状态栏和导航栏透明
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS,
-            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
-        )
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
-            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
-        )
+        // 设置透明状态栏和导航栏
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        
+        // 设置状态栏图标颜色
+        val isDark = themeMode == SettingsManager.THEME_DARK || 
+            (themeMode == SettingsManager.THEME_SYSTEM && resources.configuration.uiMode and 
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !isDark
         
         registerReceiver(permissionRequestReceiver, android.content.IntentFilter("com.example.capture.REQUEST_PERMISSION"), android.content.Context.RECEIVER_NOT_EXPORTED)
         
@@ -227,7 +237,12 @@ class MainActivity : ComponentActivity() {
         // Auto-request permission removed - user can manually request from UI
         
         setContent {
-            CaptureTheme {
+            val isDarkTheme = when (themeMode) {
+                SettingsManager.THEME_LIGHT -> false
+                SettingsManager.THEME_DARK -> true
+                else -> isSystemInDarkTheme()
+            }
+            CaptureTheme(darkTheme = isDarkTheme, dynamicColor = false) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -254,6 +269,11 @@ class MainActivity : ComponentActivity() {
                             recordingMode = mode
                             SettingsManager.setRecordingMode(this, mode)
                             screenRecordService?.setRecordingMode(mode)
+                        },
+                        themeMode = themeMode,
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                            SettingsManager.setThemeMode(this, mode)
                         }
                     )
                 }
@@ -380,16 +400,19 @@ fun MainScreen(
     floatingWindowEnabled: Boolean = false,
     onFloatingWindowToggle: (Boolean) -> Unit = {},
     recordingMode: String = SettingsManager.MODE_REAUTH,
-    onRecordingModeChange: (String) -> Unit = {}
+    onRecordingModeChange: (String) -> Unit = {},
+    themeMode: String = SettingsManager.THEME_SYSTEM,
+    onThemeModeChange: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var hasPermissions by remember { mutableStateOf(PermissionHelper.hasAllPermissions(context)) }
     var showModeDialog by remember { mutableStateOf(false) }
     
     LaunchedEffect(Unit) {
         hasPermissions = PermissionHelper.hasAllPermissions(context)
     }
+    
+    var showThemeDialog by remember { mutableStateOf(false) }
     
     if (showModeDialog) {
         AlertDialog(
@@ -422,119 +445,235 @@ fun MainScreen(
         )
     }
     
-    Scaffold(
-        topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                IconButton(onClick = { showModeDialog = true }) {
-                    Icon(Icons.Default.Settings, contentDescription = "设置")
+    if (showThemeDialog) {
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("主题模式") },
+            text = {
+                Column {
+                    Text("当前: ${when (themeMode) {
+                        SettingsManager.THEME_LIGHT -> "浅色"
+                        SettingsManager.THEME_DARK -> "深色"
+                        else -> "跟随系统"
+                    }}")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { onThemeModeChange(SettingsManager.THEME_LIGHT); showThemeDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("浅色")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { onThemeModeChange(SettingsManager.THEME_DARK); showThemeDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("深色")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { onThemeModeChange(SettingsManager.THEME_SYSTEM); showThemeDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("跟随系统")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
+                    Text("关闭")
                 }
             }
-        }
-    ) { padding ->
+        )
+    }
+    
+    val isDarkTheme = when (themeMode) {
+        SettingsManager.THEME_LIGHT -> false
+        SettingsManager.THEME_DARK -> true
+        else -> isSystemInDarkTheme()
+    }
+    
+    val backgroundColor = if (isDarkTheme) Color(0xFF1E1E2E) else Color(0xFFF5F5F5)
+    val cardColor = if (isDarkTheme) Color(0xFF2D2D44) else Color(0xFFFFFFFF)
+    val textColor = if (isDarkTheme) Color.White else Color(0xFF1E1E2E)
+    val textSecondaryColor = if (isDarkTheme) Color.White.copy(alpha = 0.7f) else Color.Gray
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                painter = painterResource(
-                    id = if (isRecording) R.drawable.ic_stop else R.drawable.ic_record
-                ),
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = if (isRecording) Color.Red else Color.Gray
-            )
+            // 顶部占位
+            Spacer(modifier = Modifier.height(48.dp))
             
-            if (isRecording) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = recordingTime,
-                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 48.sp),
-                    color = Color.Red
+            Spacer(modifier = Modifier.weight(1f))
+            
+            // 录制按钮 - 圆形
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(
+                        color = if (isRecording) Color.Gray else Color(0xFFE94560),
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(
+                        id = if (isRecording) R.drawable.ic_stop else R.drawable.ic_record
+                    ),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
                 )
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = if (isRecording) "录制中" else "屏幕录制",
-                style = MaterialTheme.typography.headlineMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (isRecording) "点击按钮停止" else "点击按钮开始",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(modifier = Modifier.height(16.dp))
             
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("悬浮窗")
-                Spacer(modifier = Modifier.width(8.dp))
-                Switch(checked = floatingWindowEnabled, onCheckedChange = onFloatingWindowToggle)
+            // 录制时间
+            if (isRecording) {
+                Text(
+                    text = recordingTime,
+                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 48.sp),
+                    color = Color(0xFFE94560)
+                )
             }
             
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
+            // 状态文字
+            Text(
+                text = if (isRecording) "录制中" else "屏幕录制",
+                style = MaterialTheme.typography.titleLarge,
+                color = textColor
+            )
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            // 录制按钮
             if (!hasPermissions) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    OutlinedButton(onClick = { 
-                        val activity = context as Activity
-                        PermissionHelper.requestOverlayPermission(activity)
-                    }) {
+                    Button(
+                        onClick = { 
+                            val activity = context as Activity
+                            PermissionHelper.requestOverlayPermission(activity)
+                        },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF3D3D5C)
+                        )
+                    ) {
                         Text("获取悬浮窗权限")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = { PermissionHelper.requestPermissions(context as Activity) }) {
+                    Button(
+                        onClick = { PermissionHelper.requestPermissions(context as Activity) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF3D3D5C)
+                        )
+                    ) {
                         Text("获取通知权限")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = { PermissionHelper.requestManageStoragePermission(context as Activity) }) {
+                    Button(
+                        onClick = { PermissionHelper.requestManageStoragePermission(context as Activity) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF3D3D5C)
+                        )
+                    ) {
                         Text("获取存储权限")
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "需要：悬浮窗、通知、存储权限才能使用",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center
-                    )
                 }
             } else {
-                Box(
+                Button(
+                    onClick = {
+                        val activity = context as Activity
+                        if (isRecording) onStopRecording() else onStartRecording()
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
-                        .background(if (isRecording) Color.Gray else Color.Red)
-                        .clickable {
-                            val activity = context as Activity
-                            if (PermissionHelper.hasAllPermissions(activity)) {
-                                if (isRecording) onStopRecording() else onStartRecording()
-                            } else {
-                                PermissionHelper.requestPermissions(activity)
-                            }
-                        },
-                    contentAlignment = Alignment.Center
+                        .height(50.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = if (isRecording) Color.Gray else Color(0xFFE94560)
+                    )
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            painter = painterResource(if (isRecording) R.drawable.ic_stop else R.drawable.ic_record),
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                    Icon(
+                        painter = painterResource(if (isRecording) R.drawable.ic_stop else R.drawable.ic_record),
+                        contentDescription = null,
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isRecording) "停止录制" else "开始录制",
+                        color = Color.White
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // 底部设置卡片
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = cardColor
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("悬浮窗", color = textColor)
+                        Switch(
+                            checked = floatingWindowEnabled,
+                            onCheckedChange = onFloatingWindowToggle
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (isRecording) "停止录制" else "开始录制", color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "录制模式: ${if (recordingMode == SettingsManager.MODE_REAUTH) "每次授权" else "权限复用"}",
+                            color = textSecondaryColor,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(onClick = { showModeDialog = true }) {
+                            Text("更改", color = Color(0xFF7B7BDB))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "主题: ${when (themeMode) {
+                                SettingsManager.THEME_LIGHT -> "浅色"
+                                SettingsManager.THEME_DARK -> "深色"
+                                else -> "跟随系统"
+                            }}",
+                            color = textSecondaryColor,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(onClick = { showThemeDialog = true }) {
+                            Text("更改", color = Color(0xFF7B7BDB))
+                        }
                     }
                 }
             }
         }
+        
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }

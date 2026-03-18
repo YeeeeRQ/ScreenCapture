@@ -84,7 +84,7 @@ object PermissionHelper {
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 android.net.Uri.parse("package:${activity.packageName}")
             )
-            activity.startActivityForResult(intent, REQUEST_OVERLAY_PERMISSION)
+            activity.startActivity(intent)
         }
     }
 

@@ -2,6 +2,8 @@ package com.example.capture.view
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -167,9 +169,9 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
     }
     
     private fun updateView() {
-        floatingImage?.setImageResource(
-            if (isRecording) R.drawable.ic_stop else R.drawable.ic_record
-        )
+        val iconRes = if (isRecording) R.drawable.ic_stop else R.drawable.ic_record
+        floatingImage?.setImageResource(iconRes)
+        floatingImage?.setColorFilter(Color.WHITE)
         floatingTimeText?.visibility = if (isRecording) View.VISIBLE else View.GONE
     }
     
