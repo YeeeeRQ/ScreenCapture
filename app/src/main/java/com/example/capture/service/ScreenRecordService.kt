@@ -74,7 +74,8 @@ class ScreenRecordService : Service() {
     data class RecordingState(
         val isRecording: Boolean = false,
         val recordingTime: String = "00:00",
-        val recordingStartTime: Long = 0
+        val recordingStartTime: Long = 0,
+        val isTakingScreenshot: Boolean = false
     )
 
     private val _recordingState = MutableStateFlow(RecordingState())
@@ -665,37 +666,45 @@ class ScreenRecordService : Service() {
         
         Log.d(TAG, "Taking screenshot...")
         
-        synchronized(snapshotLock) {
-            needSnapshot = true
-            pendingSnapshot = null
-        }
+        _recordingState.value = _recordingState.value.copy(isTakingScreenshot = true)
         
-        var waitCount = 0
-        while (waitCount < 50) {
-            Thread.sleep(10)
+        handler.postDelayed({
             synchronized(snapshotLock) {
-                if (pendingSnapshot != null) {
-                    val bitmap = pendingSnapshot
-                    pendingSnapshot = null
-                    
-                    if (bitmap != null) {
-                        val saved = saveBitmapToMediaStore(bitmap)
-                        if (saved) {
-                            activityRef?.get()?.runOnUiThread {
-                                android.widget.Toast.makeText(activityRef?.get(), "截图已保存", android.widget.Toast.LENGTH_SHORT).show()
+                needSnapshot = true
+                pendingSnapshot = null
+            }
+            
+            var waitCount = 0
+            while (waitCount < 50) {
+                Thread.sleep(10)
+                synchronized(snapshotLock) {
+                    if (pendingSnapshot != null) {
+                        val bitmap = pendingSnapshot
+                        pendingSnapshot = null
+                        
+                        if (bitmap != null) {
+                            val saved = saveBitmapToMediaStore(bitmap)
+                            _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
+                            if (saved) {
+                                activityRef?.get()?.runOnUiThread {
+                                    android.widget.Toast.makeText(activityRef?.get(), "截图已保存", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                bitmap.recycle()
+                            } else {
+                                bitmap.recycle()
                             }
-                            bitmap.recycle()
-                            return true
+                            return@postDelayed
                         }
-                        bitmap.recycle()
                     }
                 }
+                waitCount++
             }
-            waitCount++
-        }
+            
+            Log.e(TAG, "Screenshot timeout")
+            _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
+        }, 300)
         
-        Log.e(TAG, "Screenshot timeout")
-        return false
+        return true
     }
     
     private val projectionCallback: MediaProjection.Callback = object : MediaProjection.Callback() {

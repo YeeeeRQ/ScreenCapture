@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import com.example.capture.R
 import com.example.capture.service.ScreenRecordService
@@ -42,6 +43,7 @@ class FloatingView private constructor(private val context: Context) {
     private var floatingView: View? = null
     private var floatingImage: ImageView? = null
     private var floatingScreenshot: ImageView? = null
+    private var floatingScreenshotProgress: ProgressBar? = null
     private var floatingTimeText: TextView? = null
     private var params: WindowManager.LayoutParams? = null
     private var screenRecordService: ScreenRecordService? = null
@@ -59,9 +61,11 @@ class FloatingView private constructor(private val context: Context) {
     private var lastAction: Int = 0
 
     private var _isRecording: Boolean = false
+    private var _isTakingScreenshot: Boolean = false
 
     fun updateRecordingState(state: ScreenRecordService.RecordingState) {
         _isRecording = state.isRecording
+        _isTakingScreenshot = state.isTakingScreenshot
         updateView()
         if (state.isRecording) {
             updateRecordingTime(state.recordingTime)
@@ -134,6 +138,7 @@ class FloatingView private constructor(private val context: Context) {
         floatingView = inflater.inflate(R.layout.floating_view, null)
         floatingImage = floatingView?.findViewById(R.id.floating_image)
         floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
+        floatingScreenshotProgress = floatingView?.findViewById(R.id.floating_screenshot_progress)
         floatingTimeText = floatingView?.findViewById(R.id.floating_time)
         
         // Screenshot button click
@@ -192,7 +197,19 @@ class FloatingView private constructor(private val context: Context) {
         floatingImage?.setImageResource(iconRes)
         floatingImage?.setColorFilter(Color.WHITE)
         floatingTimeText?.visibility = if (_isRecording) View.VISIBLE else View.GONE
-        floatingScreenshot?.visibility = if (_isRecording) View.VISIBLE else View.GONE
+        
+        if (_isRecording) {
+            if (_isTakingScreenshot) {
+                floatingScreenshot?.visibility = View.GONE
+                floatingScreenshotProgress?.visibility = View.VISIBLE
+            } else {
+                floatingScreenshot?.visibility = View.VISIBLE
+                floatingScreenshotProgress?.visibility = View.GONE
+            }
+        } else {
+            floatingScreenshot?.visibility = View.GONE
+            floatingScreenshotProgress?.visibility = View.GONE
+        }
     }
     
     fun updateRecordingTime(timeText: String) {

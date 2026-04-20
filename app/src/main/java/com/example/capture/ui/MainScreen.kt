@@ -19,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -194,11 +195,24 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = if (uiState.isRecording) "录制中" else "屏幕录制",
-                style = MaterialTheme.typography.titleLarge,
-                color = textColor
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = if (uiState.isRecording) "录制中" else "屏幕录制",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = textColor
+                )
+                if (uiState.isTakingScreenshot) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color(0xFFE94560),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 

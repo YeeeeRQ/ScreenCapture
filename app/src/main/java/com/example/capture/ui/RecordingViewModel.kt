@@ -102,7 +102,7 @@ class RecordingViewModel(
     private fun observeRecordingState() {
         viewModelScope.launch {
             screenRecordService?.recordingState?.collect { state ->
-                _uiState.update { it.copy(isRecording = state.isRecording, recordingTime = state.recordingTime) }
+                _uiState.update { it.copy(isRecording = state.isRecording, recordingTime = state.recordingTime, isTakingScreenshot = state.isTakingScreenshot) }
                 floatingView?.updateRecordingState(state)
             }
         }

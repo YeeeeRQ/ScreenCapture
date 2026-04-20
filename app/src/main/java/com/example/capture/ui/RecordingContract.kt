@@ -10,7 +10,8 @@ data class RecordingUiState(
     val themeMode: String = SettingsManager.THEME_SYSTEM,
     val hasPermissions: Boolean = false,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val isTakingScreenshot: Boolean = false
 )
 
 sealed class RecordingIntent {
