@@ -92,8 +92,6 @@ class RecordingViewModel(
 
     fun unbindService(activity: Activity) {
         if (serviceBound) {
-            floatingView?.hide()
-            floatingView = null
             activity.unbindService(serviceConnection)
             serviceBound = false
         }

@@ -97,6 +97,29 @@ class ScreenRecordService : Service() {
     
     private val binder = LocalBinder()
     private var floatingView: FloatingView? = null
+
+    interface RecordingStateListener {
+        fun onRecordingStateChanged(state: RecordingState)
+    }
+
+    private val stateListeners = mutableListOf<RecordingStateListener>()
+
+    fun addRecordingStateListener(listener: RecordingStateListener) {
+        stateListeners.add(listener)
+    }
+
+    fun removeRecordingStateListener(listener: RecordingStateListener) {
+        stateListeners.remove(listener)
+    }
+
+    private fun notifyRecordingStateChanged(state: RecordingState) {
+        stateListeners.forEach { it.onRecordingStateChanged(state) }
+    }
+
+    private fun updateRecordingState(state: RecordingState) {
+        _recordingState.value = state
+        notifyRecordingStateChanged(state)
+    }
     
     fun setFloatingView(view: FloatingView?) {
         floatingView = view
@@ -673,7 +696,7 @@ class ScreenRecordService : Service() {
         
         Log.d(TAG, "Taking screenshot...")
         
-        _recordingState.value = _recordingState.value.copy(isTakingScreenshot = true)
+        updateRecordingState(_recordingState.value.copy(isTakingScreenshot = true))
         
         handler.postDelayed({
             synchronized(snapshotLock) {
@@ -691,7 +714,7 @@ class ScreenRecordService : Service() {
                         
                         if (bitmap != null) {
                             val (saved, filePath) = saveBitmapToMediaStore(bitmap)
-                            _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
+                            updateRecordingState(_recordingState.value.copy(isTakingScreenshot = false))
                             if (saved && filePath != null) {
                                 activityRef?.get()?.runOnUiThread {
                                     android.widget.Toast.makeText(activityRef?.get(), "截图已保存", android.widget.Toast.LENGTH_SHORT).show()
@@ -709,7 +732,7 @@ class ScreenRecordService : Service() {
             }
             
             Log.e(TAG, "Screenshot timeout")
-            _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
+            updateRecordingState(_recordingState.value.copy(isTakingScreenshot = false))
             sendScreenshotBroadcast(false, error = "Screenshot timeout")
         }, 300)
         
@@ -804,10 +827,12 @@ class ScreenRecordService : Service() {
     
     private fun showFloatingView() {
         try {
+            if (floatingView == null) {
+                floatingView = FloatingView.getInstance(applicationContext)
+            }
             floatingView?.let { fv ->
                 fv.setService(this)
                 fv.show()
-                Log.d(TAG, "FloatingView shown from Service")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing FloatingView: ${e.message}")
@@ -953,10 +978,10 @@ class ScreenRecordService : Service() {
             )
 
             recordingStartTime = System.currentTimeMillis()
-            _recordingState.value = RecordingState(
+            updateRecordingState(RecordingState(
                 isRecording = true,
                 recordingStartTime = recordingStartTime
-            )
+            ))
 
             startNotificationUpdate()
 
@@ -1006,9 +1031,9 @@ class ScreenRecordService : Service() {
                     val minutes = (elapsed / 1000) / 60
                     val timeText = String.format("%02d:%02d", minutes, seconds)
 
-                    _recordingState.value = _recordingState.value.copy(
+                    updateRecordingState(_recordingState.value.copy(
                         recordingTime = timeText
-                    )
+                    ))
 
                     val notificationManager = getSystemService(NotificationManager::class.java)
                     val notification = NotificationCompat.Builder(this@ScreenRecordService, CHANNEL_ID)
@@ -1035,7 +1060,7 @@ class ScreenRecordService : Service() {
         }
 
         isRecording = false
-        _recordingState.value = RecordingState()
+        updateRecordingState(RecordingState())
         notificationUpdateRunnable?.let { handler.removeCallbacks(it) }
 
         val tempFile = outputFile

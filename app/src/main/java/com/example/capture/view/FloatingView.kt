@@ -19,7 +19,7 @@ import android.widget.TextView
 import com.example.capture.R
 import com.example.capture.service.ScreenRecordService
 
-class FloatingView private constructor(private val context: Context) {
+class FloatingView private constructor(private val context: Context) : ScreenRecordService.RecordingStateListener {
 
     companion object {
         private const val TAG = "FloatingView"
@@ -73,16 +73,30 @@ class FloatingView private constructor(private val context: Context) {
     }
 
     fun setService(service: ScreenRecordService?) {
+        if (screenRecordService != null && service != screenRecordService) {
+            screenRecordService?.removeRecordingStateListener(this)
+        }
         screenRecordService = service
         if (service != null) {
             stopServiceRetryTimer()
+            service.addRecordingStateListener(this)
             val state = service.recordingState.value
             _isRecording = state.isRecording
+            _isTakingScreenshot = state.isTakingScreenshot
             updateView()
             if (_isRecording) {
                 updateRecordingTime(state.recordingTime)
             }
             Log.d(TAG, "Service set successfully, isRecording=$_isRecording")
+        }
+    }
+
+    override fun onRecordingStateChanged(state: ScreenRecordService.RecordingState) {
+        _isRecording = state.isRecording
+        _isTakingScreenshot = state.isTakingScreenshot
+        updateView()
+        if (state.isRecording) {
+            updateRecordingTime(state.recordingTime)
         }
     }
 
@@ -125,59 +139,51 @@ class FloatingView private constructor(private val context: Context) {
     }
     
     fun show() {
+        if (floatingView == null) {
+            val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+            floatingView = inflater.inflate(R.layout.floating_view, null)
+            floatingImage = floatingView?.findViewById(R.id.floating_image)
+            floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
+            floatingScreenshotProgress = floatingView?.findViewById(R.id.floating_screenshot_progress)
+            floatingTimeText = floatingView?.findViewById(R.id.floating_time)
+            
+            floatingScreenshot?.setOnClickListener {
+                Log.d(TAG, "Screenshot button clicked!")
+                floatingScreenshot?.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                )
+                screenRecordService?.takeScreenshot()
+            }
+            
+            val savedX = prefs.getInt("position_x", 100)
+            val savedY = prefs.getInt("position_y", 300)
+            
+            params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = savedX
+                y = savedY
+            }
+            
+            floatingView?.setOnTouchListener(touchListener)
+            floatingView?.isClickable = true
+            floatingView?.isFocusable = true
+            
+            updateView()
+        }
+        
         floatingView?.let { view ->
             try {
-                windowManager.removeView(view)
+                windowManager.addView(view, params)
             } catch (e: Exception) {
-                Log.d(TAG, "View already removed or not in window manager")
+                Log.d(TAG, "View may already be added: ${e.message}")
             }
-            floatingView = null
-        }
-        
-        val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        floatingView = inflater.inflate(R.layout.floating_view, null)
-        floatingImage = floatingView?.findViewById(R.id.floating_image)
-        floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
-        floatingScreenshotProgress = floatingView?.findViewById(R.id.floating_screenshot_progress)
-        floatingTimeText = floatingView?.findViewById(R.id.floating_time)
-        
-        // Screenshot button click
-        floatingScreenshot?.setOnClickListener {
-            Log.d(TAG, "Screenshot button clicked!")
-            // Haptic feedback
-            floatingScreenshot?.performHapticFeedback(
-                android.view.HapticFeedbackConstants.VIRTUAL_KEY,
-                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-            )
-            screenRecordService?.takeScreenshot()
-        }
-        
-        // 读取保存的位置，如果没有保存则使用默认值
-        val savedX = prefs.getInt("position_x", 100)
-        val savedY = prefs.getInt("position_y", 300)
-        
-        params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = savedX
-            y = savedY
-        }
-        
-        floatingView?.setOnTouchListener(touchListener)
-        floatingView?.isClickable = true
-        floatingView?.isFocusable = true
-        
-        updateView()
-        
-        try {
-            windowManager.addView(floatingView, params)
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
     
@@ -188,7 +194,6 @@ class FloatingView private constructor(private val context: Context) {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-            floatingView = null
         }
     }
     
