@@ -40,14 +40,12 @@ class RecordingViewModel(
     private var screenRecordService: ScreenRecordService? = null
     private var serviceBound = false
     private var floatingView: FloatingView? = null
-    private var serviceBinder: IBinder? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             Log.d(TAG, "onServiceConnected called!")
             val binder = service as ScreenRecordService.LocalBinder
             screenRecordService = binder.getService()
-            serviceBinder = service
             serviceBound = true
 
             observeRecordingState()
@@ -58,20 +56,18 @@ class RecordingViewModel(
             }
 
             if (_uiState.value.floatingWindowEnabled) {
-                floatingView = FloatingView.create(context) { serviceBinder }
-                screenRecordService?.let { service ->
-                    floatingView?.bindService(service)
-                }
+                floatingView = FloatingView.getInstance(context)
+                floatingView?.setService(screenRecordService)
                 floatingView?.show()
+                screenRecordService?.setFloatingView(floatingView)
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             Log.d(TAG, "onServiceDisconnected called!")
             screenRecordService = null
-            serviceBinder = null
             serviceBound = false
-            floatingView?.unbindService()
+            floatingView?.setService(null)
         }
     }
 
@@ -154,14 +150,12 @@ class RecordingViewModel(
         SettingsManager.setFloatingWindowEnabled(context, enabled)
 
         if (enabled) {
-            floatingView = FloatingView.create(context) { serviceBinder }
-            screenRecordService?.let { service ->
-                floatingView?.bindService(service)
-            }
+            floatingView = FloatingView.getInstance(context)
+            floatingView?.setService(screenRecordService)
             floatingView?.show()
+            screenRecordService?.setFloatingView(floatingView)
         } else {
             floatingView?.hide()
-            floatingView?.release()
             floatingView = null
         }
     }

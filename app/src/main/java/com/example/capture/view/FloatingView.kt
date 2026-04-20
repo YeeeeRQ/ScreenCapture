@@ -3,9 +3,9 @@ package com.example.capture.view
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
@@ -20,21 +20,27 @@ import com.example.capture.R
 import com.example.capture.service.RecordingState
 import com.example.capture.service.RecordingStateListener
 import com.example.capture.service.ScreenRecordService
-import java.lang.ref.WeakReference
 
-class FloatingView private constructor(
-    private val context: Context,
-    private val serviceTokenProvider: () -> IBinder?
-) : RecordingStateListener {
+class FloatingView private constructor(private val context: Context) : RecordingStateListener {
 
     companion object {
         private const val TAG = "FloatingView"
 
-        fun create(
-            context: Context,
-            serviceTokenProvider: () -> IBinder?
-        ): FloatingView {
-            return FloatingView(context, serviceTokenProvider)
+        @Volatile
+        private var instance: FloatingView? = null
+
+        fun getInstance(context: Context): FloatingView {
+            return instance ?: synchronized(this) {
+                instance ?: FloatingView(context).also { instance = it }
+            }
+        }
+
+        fun release() {
+            instance?.let { fv ->
+                fv.screenRecordService?.removeRecordingStateListener(fv)
+                fv.hide()
+            }
+            instance = null
         }
     }
 
@@ -45,8 +51,9 @@ class FloatingView private constructor(
     private var floatingScreenshotProgress: ProgressBar? = null
     private var floatingTimeText: TextView? = null
     private var params: WindowManager.LayoutParams? = null
-
-    private var serviceRef: WeakReference<ScreenRecordService>? = null
+    private var screenRecordService: ScreenRecordService? = null
+    private var serviceRetryHandler: Handler? = null
+    private var serviceRetryRunnable: Runnable? = null
 
     private val prefs by lazy {
         context.getSharedPreferences("floating_view_prefs", Context.MODE_PRIVATE)
@@ -61,28 +68,63 @@ class FloatingView private constructor(
     private var _isRecording: Boolean = false
     private var _isTakingScreenshot: Boolean = false
 
-    private var isViewAttached: Boolean = false
-
-    private val mainHandler = Handler(Looper.getMainLooper())
-
-    private val service: ScreenRecordService?
-        get() {
-            val binder = serviceTokenProvider() ?: return null
-            val method = binder.javaClass.getMethod("getService")
-            return method.invoke(binder) as? ScreenRecordService
+    fun updateRecordingState(state: RecordingState) {
+        _isRecording = state.isRecording
+        _isTakingScreenshot = state.isTakingScreenshot
+        updateView()
+        if (state.isRecording) {
+            updateRecordingTime(state.recordingTime)
         }
+    }
+
+    fun setService(service: ScreenRecordService?) {
+        if (screenRecordService != null && service != screenRecordService) {
+            screenRecordService?.removeRecordingStateListener(this)
+        }
+        screenRecordService = service
+        if (service != null) {
+            stopServiceRetryTimer()
+            service.addRecordingStateListener(this)
+            val state = service.recordingState.value
+            _isRecording = state.isRecording
+            _isTakingScreenshot = state.isTakingScreenshot
+            updateView()
+            if (_isRecording) {
+                updateRecordingTime(state.recordingTime)
+            }
+            Log.d(TAG, "Service set successfully, isRecording=$_isRecording")
+        }
+    }
 
     override fun onRecordingStateChanged(state: RecordingState) {
         _isRecording = state.isRecording
         _isTakingScreenshot = state.isTakingScreenshot
-        mainHandler.post {
-            updateView()
-            if (state.isRecording) {
-                updateRecordingTime(state.recordingTime)
-            }
+        updateView()
+        if (state.isRecording) {
+            updateRecordingTime(state.recordingTime)
         }
     }
 
+    private fun startServiceRetryTimer() {
+        if (serviceRetryHandler == null) {
+            serviceRetryHandler = Handler(Looper.getMainLooper())
+        }
+        serviceRetryRunnable = object : Runnable {
+            override fun run() {
+                if (screenRecordService == null) {
+                    Log.d(TAG, "Service still null, retrying...")
+                    startServiceRetryTimer()
+                }
+            }
+        }
+        serviceRetryHandler?.postDelayed(serviceRetryRunnable!!, 1000)
+    }
+    
+    private fun stopServiceRetryTimer() {
+        serviceRetryRunnable?.let { serviceRetryHandler?.removeCallbacks(it) }
+        serviceRetryRunnable = null
+    }
+    
     fun show() {
         if (floatingView == null) {
             val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
@@ -91,19 +133,19 @@ class FloatingView private constructor(
             floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
             floatingScreenshotProgress = floatingView?.findViewById(R.id.floating_screenshot_progress)
             floatingTimeText = floatingView?.findViewById(R.id.floating_time)
-
+            
             floatingScreenshot?.setOnClickListener {
                 Log.d(TAG, "Screenshot button clicked!")
                 floatingScreenshot?.performHapticFeedback(
                     android.view.HapticFeedbackConstants.VIRTUAL_KEY,
                     android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
                 )
-                service?.takeScreenshot()
+                screenRecordService?.takeScreenshot()
             }
-
+            
             val savedX = prefs.getInt("position_x", 100)
             val savedY = prefs.getInt("position_y", 300)
-
+            
             params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -115,58 +157,39 @@ class FloatingView private constructor(
                 x = savedX
                 y = savedY
             }
-
+            
             floatingView?.setOnTouchListener(touchListener)
             floatingView?.isClickable = true
             floatingView?.isFocusable = true
-
+            
             updateView()
         }
-
+        
         floatingView?.let { view ->
-            if (!isViewAttached) {
-                try {
-                    windowManager.addView(view, params)
-                    isViewAttached = true
-                } catch (e: Exception) {
-                    Log.d(TAG, "View may already be added: ${e.message}")
-                }
+            try {
+                windowManager.addView(view, params)
+            } catch (e: Exception) {
+                Log.d(TAG, "View may already be added: ${e.message}")
             }
         }
     }
-
+    
     fun hide() {
         floatingView?.let {
-            if (isViewAttached) {
-                try {
-                    windowManager.removeView(it)
-                    isViewAttached = false
-                } catch (e: Exception) {
-                    Log.d(TAG, "View remove error: ${e.message}")
-                }
+            try {
+                windowManager.removeView(it)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
-
-    fun release() {
-        hide()
-        service?.removeRecordingStateListener(this)
-        serviceRef?.clear()
-        serviceRef = null
-        floatingView = null
-        floatingImage = null
-        floatingScreenshot = null
-        floatingScreenshotProgress = null
-        floatingTimeText = null
-        params = null
-    }
-
+    
     private fun updateView() {
         val iconRes = if (_isRecording) R.drawable.ic_stop else R.drawable.ic_record
         floatingImage?.setImageResource(iconRes)
         floatingImage?.setColorFilter(Color.WHITE)
         floatingTimeText?.visibility = if (_isRecording) View.VISIBLE else View.GONE
-
+        
         if (_isRecording) {
             if (_isTakingScreenshot) {
                 floatingScreenshot?.visibility = View.GONE
@@ -180,40 +203,11 @@ class FloatingView private constructor(
             floatingScreenshotProgress?.visibility = View.GONE
         }
     }
-
+    
     fun updateRecordingTime(timeText: String) {
         floatingTimeText?.text = timeText
     }
-
-    fun updateRecordingState(state: RecordingState) {
-        _isRecording = state.isRecording
-        _isTakingScreenshot = state.isTakingScreenshot
-        updateView()
-        if (state.isRecording) {
-            updateRecordingTime(state.recordingTime)
-        }
-    }
-
-    fun bindService(service: ScreenRecordService) {
-        serviceRef?.clear()
-        serviceRef = WeakReference(service)
-        service.addRecordingStateListener(this)
-        val state = service.recordingState.value
-        _isRecording = state.isRecording
-        _isTakingScreenshot = state.isTakingScreenshot
-        updateView()
-        if (_isRecording) {
-            updateRecordingTime(state.recordingTime)
-        }
-        Log.d(TAG, "Service bound, isRecording=$_isRecording")
-    }
-
-    fun unbindService() {
-        service?.removeRecordingStateListener(this)
-        serviceRef?.clear()
-        serviceRef = null
-    }
-
+    
     @SuppressLint("ClickableViewAccessibility")
     private val touchListener = View.OnTouchListener { _, event ->
         Log.d(TAG, "Touch event: ${event.action}")
@@ -237,20 +231,27 @@ class FloatingView private constructor(
                 val deltaX = Math.abs(event.rawX - initialTouchX)
                 val deltaY = Math.abs(event.rawY - initialTouchY)
                 Log.d(TAG, "ACTION_UP: deltaX=$deltaX, deltaY=$deltaY, lastAction=$lastAction")
-
+                
+                // 保存位置
                 params?.let {
                     prefs.edit()
                         .putInt("position_x", it.x)
                         .putInt("position_y", it.y)
                         .apply()
                 }
-
+                
                 if (deltaX < 30 && deltaY < 30) {
+                    // Haptic feedback for record button
                     floatingView?.performHapticFeedback(
                         android.view.HapticFeedbackConstants.VIRTUAL_KEY,
                         android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
                     )
-                    service?.toggleRecording()
+                    if (screenRecordService != null) {
+                        Log.d(TAG, "Calling toggleRecording!")
+                        screenRecordService?.toggleRecording()
+                    } else {
+                        Log.w(TAG, "Service is null, cannot toggle recording!")
+                    }
                 }
                 true
             }

@@ -111,7 +111,11 @@ class ScreenRecordService : Service() {
         _recordingState.value = state
         notifyRecordingStateChanged(state)
     }
-
+    
+    fun setFloatingView(view: FloatingView?) {
+        floatingView = view
+    }
+    
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaRecorder: MediaRecorder? = null
@@ -558,20 +562,15 @@ class ScreenRecordService : Service() {
     private fun showFloatingView() {
         try {
             if (floatingView == null) {
-                floatingView = FloatingView.create(applicationContext) { binder }
+                floatingView = FloatingView.getInstance(applicationContext)
             }
             floatingView?.let { fv ->
-                fv.bindService(this)
+                fv.setService(this)
                 fv.show()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing FloatingView: ${e.message}")
         }
-    }
-
-    private fun releaseFloatingView() {
-        floatingView?.release()
-        floatingView = null
     }
     
     override fun onCreate() {
@@ -930,7 +929,6 @@ class ScreenRecordService : Service() {
     fun getOutputFile(): File? = outputFile
 
     override fun onDestroy() {
-        releaseFloatingView()
         stopRecording()
         super.onDestroy()
     }
