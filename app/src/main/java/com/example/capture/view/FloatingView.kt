@@ -34,7 +34,10 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         }
 
         fun release() {
-            instance?.hide()
+            instance?.let { fv ->
+                fv.screenRecordService?.removeRecordingStateListener(fv)
+                fv.hide()
+            }
             instance = null
         }
     }

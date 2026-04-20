@@ -174,24 +174,4 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         viewModel.unbindService(this)
     }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1003) {
-            if (PermissionHelper.hasOverlayPermission(this)) {
-                viewModel.processIntent(RecordingIntent.StartRecording)
-            } else {
-                Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show()
-            }
-        } else if (requestCode == 1001) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                Log.d("ScreenRecord", "MediaProjection permission granted via onActivityResult")
-                viewModel.onMediaProjectionResult(resultCode, data)
-                window.decorView.postDelayed({
-                    moveTaskToBack(true)
-                }, 500)
-            }
-        }
-    }
 }
