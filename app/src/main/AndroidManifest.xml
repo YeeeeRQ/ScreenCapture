@@ -43,10 +43,26 @@
             android:noHistory="true"
             android:taskAffinity="com.example.capture.permission" />
 
+        <activity-alias
+            android:name=".StartRecordingActivity"
+            android:targetActivity=".PermissionActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.capture.START" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".service.ScreenRecordService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:exported="true"
+            android:foregroundServiceType="mediaProjection">
+            <intent-filter>
+                <action android:name="com.example.capture.START" />
+                <action android:name="com.example.capture.STOP" />
+                <action android:name="com.example.capture.SCREENSHOT" />
+                <action android:name="com.example.capture.STATUS" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

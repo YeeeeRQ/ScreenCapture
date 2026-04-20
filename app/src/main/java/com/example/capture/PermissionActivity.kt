@@ -24,7 +24,6 @@ class PermissionActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 使状态栏和导航栏透明
         window.setFlags(
             WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS,
             WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
@@ -36,7 +35,6 @@ class PermissionActivity : Activity() {
         
         Log.d(TAG, "PermissionActivity created")
         
-        // 请求 MediaProjection 权限
         requestMediaProjectionPermission()
     }
     
@@ -50,14 +48,24 @@ class PermissionActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         
         if (requestCode == 1001) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
+            val granted = resultCode == Activity.RESULT_OK && data != null
+            
+            // 发送授权结果广播
+            val resultIntent = Intent(ScreenRecordService.BROADCAST_AUTHORIZATION_RESULT).apply {
+                putExtra("granted", granted)
+                putExtra("result_code", resultCode)
+                if (!granted) {
+                    putExtra("error", "User denied or cancelled")
+                }
+            }
+            sendBroadcast(resultIntent)
+            
+            if (granted) {
                 Log.d(TAG, "Permission granted, resultCode=$resultCode")
                 
-                // 保存到静态变量，供 Service 读取
                 pendingResultCode = resultCode
                 pendingData = data
                 
-                // 启动录制服务
                 val serviceIntent = Intent(this, ScreenRecordService::class.java).apply {
                     action = ScreenRecordService.ACTION_START
                 }
@@ -66,7 +74,6 @@ class PermissionActivity : Activity() {
                 Log.d(TAG, "Permission denied")
             }
             
-            // 延迟一点关闭，让服务有时间启动，然后使用 finishAffinity 确保不恢复之前的 Activity
             handler.postDelayed({
                 finishAffinity()
             }, 500)

@@ -60,7 +60,12 @@ class ScreenRecordService : Service() {
         const val NOTIFICATION_ID = 1
         const val ACTION_START = "com.example.capture.START"
         const val ACTION_STOP = "com.example.capture.STOP"
-        const val ACTION_TOGGLE = "com.example.capture.TOGGLE"
+        const val ACTION_SCREENSHOT = "com.example.capture.SCREENSHOT"
+        const val ACTION_STATUS = "com.example.capture.STATUS"
+
+        const val BROADCAST_AUTHORIZATION_RESULT = "com.example.capture.AUTHORIZATION_RESULT"
+        const val BROADCAST_SCREENSHOT_RESULT = "com.example.capture.SCREENSHOT_RESULT"
+        const val BROADCAST_STATUS_RESULT = "com.example.capture.STATUS_RESULT"
 
         const val VIDEO_WIDTH = 720
         const val VIDEO_HEIGHT = 1280
@@ -402,13 +407,14 @@ class ScreenRecordService : Service() {
         }
     }
     
-    private fun saveBitmapToMediaStore(bitmap: Bitmap): Boolean {
+    private fun saveBitmapToMediaStore(bitmap: Bitmap): Pair<Boolean, String?> {
         return try {
             val filename = "Screen_${System.currentTimeMillis()}.png"
+            val relativePath = "Pictures/ScreenRecord"
             val contentValues = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, filename)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ScreenRecord")
+                put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
             }
             
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
@@ -416,12 +422,13 @@ class ScreenRecordService : Service() {
                 contentResolver.openOutputStream(it)?.use { os ->
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
                 }
-                Log.d(TAG, "Screenshot saved: $uri")
-                true
-            } ?: false
+                val filePath = "$relativePath/$filename"
+                Log.d(TAG, "Screenshot saved: $filePath")
+                Pair(true, filePath)
+            } ?: Pair(false, null)
         } catch (e: Exception) {
             Log.e(TAG, "Save bitmap error: ${e.message}")
-            false
+            Pair(false, null)
         }
     }
     
@@ -683,16 +690,17 @@ class ScreenRecordService : Service() {
                         pendingSnapshot = null
                         
                         if (bitmap != null) {
-                            val saved = saveBitmapToMediaStore(bitmap)
+                            val (saved, filePath) = saveBitmapToMediaStore(bitmap)
                             _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
-                            if (saved) {
+                            if (saved && filePath != null) {
                                 activityRef?.get()?.runOnUiThread {
                                     android.widget.Toast.makeText(activityRef?.get(), "截图已保存", android.widget.Toast.LENGTH_SHORT).show()
                                 }
-                                bitmap.recycle()
+                                sendScreenshotBroadcast(true, filePath)
                             } else {
-                                bitmap.recycle()
+                                sendScreenshotBroadcast(false, error = "Failed to save screenshot")
                             }
+                            bitmap.recycle()
                             return@postDelayed
                         }
                     }
@@ -702,6 +710,7 @@ class ScreenRecordService : Service() {
             
             Log.e(TAG, "Screenshot timeout")
             _recordingState.value = _recordingState.value.copy(isTakingScreenshot = false)
+            sendScreenshotBroadcast(false, error = "Screenshot timeout")
         }, 300)
         
         return true
@@ -754,9 +763,43 @@ class ScreenRecordService : Service() {
                 Log.d(TAG, "Stopping recording via ACTION_STOP")
                 stopRecording()
             }
+            ACTION_SCREENSHOT -> {
+                Log.d(TAG, "Screenshot requested via Intent")
+                if (!takeScreenshot()) {
+                    sendScreenshotBroadcast(false, error = "Not recording")
+                }
+            }
+            ACTION_STATUS -> {
+                Log.d(TAG, "Status requested via Intent")
+                sendStatusBroadcast()
+            }
         }
         
         return START_STICKY
+    }
+
+    private fun sendScreenshotBroadcast(success: Boolean, filePath: String? = null, error: String? = null) {
+        val intent = Intent(BROADCAST_SCREENSHOT_RESULT).apply {
+            putExtra("success", success)
+            if (filePath != null) {
+                putExtra("file_path", filePath)
+            }
+            if (error != null) {
+                putExtra("error", error)
+            }
+        }
+        Log.d(TAG, "Sending SCREENSHOT_RESULT broadcast: success=$success, path=$filePath, error=$error")
+        sendBroadcast(intent)
+    }
+
+    private fun sendStatusBroadcast() {
+        val state = _recordingState.value
+        val intent = Intent(BROADCAST_STATUS_RESULT).apply {
+            putExtra("isRecording", state.isRecording)
+            putExtra("recordingTime", state.recordingTime)
+        }
+        Log.d(TAG, "Sending STATUS_RESULT broadcast: isRecording=${state.isRecording}, time=${state.recordingTime}")
+        sendBroadcast(intent)
     }
     
     private fun showFloatingView() {
