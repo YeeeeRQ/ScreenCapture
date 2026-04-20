@@ -55,33 +55,26 @@ import java.nio.ByteOrder
 class ScreenRecordService : Service() {
 
     companion object {
-        private const val TAG = "ScreenRecord"
-        const val CHANNEL_ID = "screen_record_channel"
-        const val NOTIFICATION_ID = 1
-        const val ACTION_START = "com.example.capture.START"
-        const val ACTION_STOP = "com.example.capture.STOP"
-        const val ACTION_SCREENSHOT = "com.example.capture.SCREENSHOT"
-        const val ACTION_STATUS = "com.example.capture.STATUS"
+        private const val TAG = RecordingConstants.TAG
+        const val CHANNEL_ID = RecordingConstants.CHANNEL_ID
+        const val NOTIFICATION_ID = RecordingConstants.NOTIFICATION_ID
+        const val ACTION_START = RecordingConstants.ACTION_START
+        const val ACTION_STOP = RecordingConstants.ACTION_STOP
+        const val ACTION_SCREENSHOT = RecordingConstants.ACTION_SCREENSHOT
+        const val ACTION_STATUS = RecordingConstants.ACTION_STATUS
 
-        const val BROADCAST_AUTHORIZATION_RESULT = "com.example.capture.AUTHORIZATION_RESULT"
-        const val BROADCAST_SCREENSHOT_RESULT = "com.example.capture.SCREENSHOT_RESULT"
-        const val BROADCAST_STATUS_RESULT = "com.example.capture.STATUS_RESULT"
+        const val BROADCAST_AUTHORIZATION_RESULT = RecordingConstants.BROADCAST_AUTHORIZATION_RESULT
+        const val BROADCAST_SCREENSHOT_RESULT = RecordingConstants.BROADCAST_SCREENSHOT_RESULT
+        const val BROADCAST_STATUS_RESULT = RecordingConstants.BROADCAST_STATUS_RESULT
 
-        const val VIDEO_WIDTH = 720
-        const val VIDEO_HEIGHT = 1280
-        const val VIDEO_BIT_RATE = 4000000
-        const val VIDEO_FRAME_RATE = 30
+        const val VIDEO_WIDTH = RecordingConstants.VIDEO_WIDTH
+        const val VIDEO_HEIGHT = RecordingConstants.VIDEO_HEIGHT
+        const val VIDEO_BIT_RATE = RecordingConstants.VIDEO_BIT_RATE
+        const val VIDEO_FRAME_RATE = RecordingConstants.VIDEO_FRAME_RATE
 
-        const val MODE_REAUTH = "reauth"
-        const val MODE_REUSE = "reuse"
+        const val MODE_REAUTH = RecordingConstants.MODE_REAUTH
+        const val MODE_REUSE = RecordingConstants.MODE_REUSE
     }
-
-    data class RecordingState(
-        val isRecording: Boolean = false,
-        val recordingTime: String = "00:00",
-        val recordingStartTime: Long = 0,
-        val isTakingScreenshot: Boolean = false
-    )
 
     private val _recordingState = MutableStateFlow(RecordingState())
     val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
@@ -98,11 +91,9 @@ class ScreenRecordService : Service() {
     private val binder = LocalBinder()
     private var floatingView: FloatingView? = null
 
-    interface RecordingStateListener {
-        fun onRecordingStateChanged(state: RecordingState)
-    }
-
     private val stateListeners = mutableListOf<RecordingStateListener>()
+
+    private val notificationHelper by lazy { NotificationHelper(this) }
 
     fun addRecordingStateListener(listener: RecordingStateListener) {
         stateListeners.add(listener)
@@ -841,62 +832,15 @@ class ScreenRecordService : Service() {
     
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        notificationHelper.createNotificationChannel()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = getString(R.string.notification_channel_description)
-            setShowBadge(false)
-        }
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(channel)
-    }
-
-    private fun createNotification(): Notification {
-        val stopIntent = Intent(this, ScreenRecordService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            0,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val openIntent = Intent(this, PermissionActivity::class.java)
-        val openPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.recording_title))
-            .setContentText(getString(R.string.recording_text))
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(openPendingIntent)
-            .addAction(
-                android.R.drawable.ic_media_pause,
-                getString(R.string.stop_recording),
-                stopPendingIntent
-            )
-            .setOngoing(true)
-            .setSilent(true)
-            .build()
-    }
-    
     private fun startRecordingInternal(resultCode: Int, data: Intent) {
         if (isRecording) return
 
         Log.d(TAG, "=== startRecordingInternal: MediaCodec mode ===")
 
-        val notification = createNotification()
+        val notification = notificationHelper.createNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
@@ -1036,13 +980,7 @@ class ScreenRecordService : Service() {
                     ))
 
                     val notificationManager = getSystemService(NotificationManager::class.java)
-                    val notification = NotificationCompat.Builder(this@ScreenRecordService, CHANNEL_ID)
-                        .setContentTitle(getString(R.string.recording_title))
-                        .setContentText("${getString(R.string.recording_in_progress)} $timeText")
-                        .setSmallIcon(android.R.drawable.ic_media_play)
-                        .setOngoing(true)
-                        .setSilent(true)
-                        .build()
+                    val notification = notificationHelper.createRecordingNotification(timeText)
 
                     notificationManager.notify(NOTIFICATION_ID, notification)
                     handler.postDelayed(this, 1000)

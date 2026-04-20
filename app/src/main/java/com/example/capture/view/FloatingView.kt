@@ -17,9 +17,11 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import com.example.capture.R
+import com.example.capture.service.RecordingState
+import com.example.capture.service.RecordingStateListener
 import com.example.capture.service.ScreenRecordService
 
-class FloatingView private constructor(private val context: Context) : ScreenRecordService.RecordingStateListener {
+class FloatingView private constructor(private val context: Context) : RecordingStateListener {
 
     companion object {
         private const val TAG = "FloatingView"
@@ -66,7 +68,7 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
     private var _isRecording: Boolean = false
     private var _isTakingScreenshot: Boolean = false
 
-    fun updateRecordingState(state: ScreenRecordService.RecordingState) {
+    fun updateRecordingState(state: RecordingState) {
         _isRecording = state.isRecording
         _isTakingScreenshot = state.isTakingScreenshot
         updateView()
@@ -94,7 +96,7 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         }
     }
 
-    override fun onRecordingStateChanged(state: ScreenRecordService.RecordingState) {
+    override fun onRecordingStateChanged(state: RecordingState) {
         _isRecording = state.isRecording
         _isTakingScreenshot = state.isTakingScreenshot
         updateView()
