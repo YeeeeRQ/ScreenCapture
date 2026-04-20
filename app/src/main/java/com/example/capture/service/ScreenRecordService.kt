@@ -52,7 +52,7 @@ import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-class ScreenRecordService : Service() {
+class ScreenRecordService : Service(), RecordingServiceInterface {
 
     companion object {
         private const val TAG = RecordingConstants.TAG
@@ -77,7 +77,7 @@ class ScreenRecordService : Service() {
     }
 
     private val _recordingState = MutableStateFlow(RecordingState())
-    val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
+    override val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
 
     private var recordingMode = MODE_REAUTH
 
@@ -95,11 +95,11 @@ class ScreenRecordService : Service() {
 
     private val notificationHelper by lazy { NotificationHelper(this) }
 
-    fun addRecordingStateListener(listener: RecordingStateListener) {
+    override fun addRecordingStateListener(listener: RecordingStateListener) {
         stateListeners.add(listener)
     }
 
-    fun removeRecordingStateListener(listener: RecordingStateListener) {
+    override fun removeRecordingStateListener(listener: RecordingStateListener) {
         stateListeners.remove(listener)
     }
 
@@ -111,8 +111,8 @@ class ScreenRecordService : Service() {
         _recordingState.value = state
         notifyRecordingStateChanged(state)
     }
-    
-    fun setFloatingView(view: FloatingView?) {
+
+    override fun setFloatingView(view: FloatingView?) {
         floatingView = view
     }
     
@@ -334,7 +334,7 @@ class ScreenRecordService : Service() {
         }
     }
 
-    fun saveProjectionData(resultCode: Int, data: Intent) {
+    override fun saveProjectionData(resultCode: Int, data: Intent) {
         savedResultCode = resultCode
         savedData = data
         Log.d(TAG, "Projection data saved to memory: resultCode=$resultCode")
@@ -345,8 +345,8 @@ class ScreenRecordService : Service() {
             startRecordingInternal(resultCode, data)
         }
     }
-    
-    fun setRecordingMode(mode: String) {
+
+    override fun setRecordingMode(mode: String) {
         recordingMode = mode
         Log.d(TAG, "Recording mode set to: $mode")
     }
@@ -372,7 +372,7 @@ class ScreenRecordService : Service() {
         return savedResultCode != 0 && savedData != null
     }
 
-    fun toggleRecording() {
+    override fun toggleRecording() {
         Log.d(TAG, "toggleRecording called, isRecording=$isRecording")
         
         if (isRecording) {
@@ -422,7 +422,7 @@ class ScreenRecordService : Service() {
         }
     }
 
-    fun takeScreenshot(): Boolean {
+    override fun takeScreenshot(): Boolean {
         if (!isRecording) {
             Log.w(TAG, "Cannot take screenshot: not recording")
             return false

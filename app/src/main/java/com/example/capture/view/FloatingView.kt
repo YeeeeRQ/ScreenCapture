@@ -17,9 +17,9 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import com.example.capture.R
+import com.example.capture.service.RecordingServiceInterface
 import com.example.capture.service.RecordingState
 import com.example.capture.service.RecordingStateListener
-import com.example.capture.service.ScreenRecordService
 
 class FloatingView private constructor(private val context: Context) : RecordingStateListener {
 
@@ -51,7 +51,7 @@ class FloatingView private constructor(private val context: Context) : Recording
     private var floatingScreenshotProgress: ProgressBar? = null
     private var floatingTimeText: TextView? = null
     private var params: WindowManager.LayoutParams? = null
-    private var screenRecordService: ScreenRecordService? = null
+    private var screenRecordService: RecordingServiceInterface? = null
     private var serviceRetryHandler: Handler? = null
     private var serviceRetryRunnable: Runnable? = null
 
@@ -77,7 +77,7 @@ class FloatingView private constructor(private val context: Context) : Recording
         }
     }
 
-    fun setService(service: ScreenRecordService?) {
+    fun setService(service: RecordingServiceInterface?) {
         if (screenRecordService != null && service != screenRecordService) {
             screenRecordService?.removeRecordingStateListener(this)
         }

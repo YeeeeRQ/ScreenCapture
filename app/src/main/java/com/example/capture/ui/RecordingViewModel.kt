@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.capture.helper.PermissionHelper
 import com.example.capture.helper.SettingsManager
+import com.example.capture.service.RecordingServiceInterface
 import com.example.capture.service.ScreenRecordService
 import com.example.capture.view.FloatingView
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,7 +38,7 @@ class RecordingViewModel(
     private val _uiEvent = MutableSharedFlow<RecordingUiEvent>()
     val uiEvent: SharedFlow<RecordingUiEvent> = _uiEvent.asSharedFlow()
 
-    private var screenRecordService: ScreenRecordService? = null
+    private var screenRecordService: RecordingServiceInterface? = null
     private var serviceBound = false
     private var floatingView: FloatingView? = null
 
