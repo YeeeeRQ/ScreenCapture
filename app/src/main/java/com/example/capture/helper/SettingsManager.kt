@@ -6,6 +6,7 @@ object SettingsManager {
     private const val PREFS_NAME = "screen_record_settings"
     const val KEY_RECORDING_MODE = "recording_mode"
     const val KEY_THEME_MODE = "theme_mode"
+    const val KEY_FLOATING_WINDOW_ENABLED = "floating_window_enabled"
     
     const val MODE_REAUTH = "reauth"
     const val MODE_REUSE = "reuse"
@@ -32,5 +33,15 @@ object SettingsManager {
     fun setThemeMode(context: Context, mode: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_THEME_MODE, mode).apply()
+    }
+
+    fun getFloatingWindowEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_FLOATING_WINDOW_ENABLED, false)
+    }
+
+    fun setFloatingWindowEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_FLOATING_WINDOW_ENABLED, enabled).apply()
     }
 }

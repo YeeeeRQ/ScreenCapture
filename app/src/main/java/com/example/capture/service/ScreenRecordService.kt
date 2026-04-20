@@ -38,22 +38,22 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Surface
 import android.view.WindowManager
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import com.example.capture.MainActivity
 import com.example.capture.PermissionActivity
 import com.example.capture.R
 import com.example.capture.view.FloatingView
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.FileInputStream
+import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.io.FileOutputStream
-import java.lang.ref.WeakReference
 
 class ScreenRecordService : Service() {
-    
+
     companion object {
         private const val TAG = "ScreenRecord"
         const val CHANNEL_ID = "screen_record_channel"
@@ -61,26 +61,27 @@ class ScreenRecordService : Service() {
         const val ACTION_START = "com.example.capture.START"
         const val ACTION_STOP = "com.example.capture.STOP"
         const val ACTION_TOGGLE = "com.example.capture.TOGGLE"
-        
+
         const val VIDEO_WIDTH = 720
         const val VIDEO_HEIGHT = 1280
         const val VIDEO_BIT_RATE = 4000000
         const val VIDEO_FRAME_RATE = 30
-        
+
         const val MODE_REAUTH = "reauth"
         const val MODE_REUSE = "reuse"
     }
-    
+
+    data class RecordingState(
+        val isRecording: Boolean = false,
+        val recordingTime: String = "00:00",
+        val recordingStartTime: Long = 0
+    )
+
+    private val _recordingState = MutableStateFlow(RecordingState())
+    val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
+
     private var recordingMode = MODE_REAUTH
 
-    interface RecordingCallback {
-        fun onRecordingStarted()
-        fun onRecordingStopped()
-        fun onRecordingError(error: String)
-    }
-
-    private var recordingCallback: RecordingCallback? = null
-    
     private var savedResultCode: Int = 0
     private var savedData: Intent? = null
     
@@ -568,10 +569,6 @@ class ScreenRecordService : Service() {
         }
     }
 
-    fun setCallback(callback: RecordingCallback?) {
-        recordingCallback = callback
-    }
-
     fun saveProjectionData(resultCode: Int, data: Intent) {
         savedResultCode = resultCode
         savedData = data
@@ -716,22 +713,37 @@ class ScreenRecordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand called with action: ${intent?.action}")
         
-        if (intent?.action == ACTION_START) {
-            val resultCode = PermissionActivity.pendingResultCode
-            val data = PermissionActivity.pendingData
-            
-            Log.d(TAG, "Reading from static: resultCode=$resultCode, data=${data != null}")
-            
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                saveProjectionData(resultCode, data)
-                startRecordingInternal(resultCode, data)
+        when (intent?.action) {
+            ACTION_START -> {
+                var resultCode = intent.getIntExtra("result_code", Activity.RESULT_CANCELED)
+                var data = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra("data", Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra("data")
+                }
                 
-                // 显示 FloatingView
-                showFloatingView()
+                // Fallback to PermissionActivity static variables if not in intent
+                if (resultCode == Activity.RESULT_CANCELED || data == null) {
+                    Log.d(TAG, "Intent extras not found, falling back to static variables")
+                    resultCode = PermissionActivity.pendingResultCode
+                    data = PermissionActivity.pendingData
+                    PermissionActivity.pendingResultCode = -1
+                    PermissionActivity.pendingData = null
+                }
                 
-                // 清除静态变量
-                PermissionActivity.pendingResultCode = -1
-                PermissionActivity.pendingData = null
+                Log.d(TAG, "Start recording: resultCode=$resultCode, data=${data != null}")
+                
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    saveProjectionData(resultCode, data)
+                    startRecordingInternal(resultCode, data)
+                    
+                    showFloatingView()
+                }
+            }
+            ACTION_STOP -> {
+                Log.d(TAG, "Stopping recording via ACTION_STOP")
+                stopRecording()
             }
         }
         
@@ -740,15 +752,11 @@ class ScreenRecordService : Service() {
     
     private fun showFloatingView() {
         try {
-            // 先隐藏并释放旧的实例
-            FloatingView.release()
-            
-            // 创建新的单例实例
-            floatingView = FloatingView.getInstance(this)
-            floatingView?.setService(this)
-            floatingView?.isRecording = true
-            floatingView?.show()
-            Log.d(TAG, "FloatingView shown from Service")
+            floatingView?.let { fv ->
+                fv.setService(this)
+                fv.show()
+                Log.d(TAG, "FloatingView shown from Service")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing FloatingView: ${e.message}")
         }
@@ -811,14 +819,11 @@ class ScreenRecordService : Service() {
 
         Log.d(TAG, "=== startRecordingInternal: MediaCodec mode ===")
 
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, createNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting foreground: ${e.message}")
+        val notification = createNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
 
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -877,13 +882,13 @@ class ScreenRecordService : Service() {
             Log.d(TAG, "Pre-warm complete")
             
             val inputSurface = Surface(surfaceTexture)
-            
+
             isRecording = true
-            
+
             startRenderThread()
-            
+
             Thread.sleep(100)
-            
+
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "ScreenCapture",
                 screenWidth,
@@ -894,18 +899,20 @@ class ScreenRecordService : Service() {
                 null,
                 handler
             )
-            
+
             recordingStartTime = System.currentTimeMillis()
-            
+            _recordingState.value = RecordingState(
+                isRecording = true,
+                recordingStartTime = recordingStartTime
+            )
+
             startNotificationUpdate()
-            recordingCallback?.onRecordingStarted()
-            
+
             Log.d(TAG, "Recording started!")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "ERROR starting recording: ${e.message}")
             e.printStackTrace()
-            recordingCallback?.onRecordingError(e.message ?: "Unknown error")
             cleanup()
         }
     }
@@ -946,7 +953,11 @@ class ScreenRecordService : Service() {
                     val seconds = (elapsed / 1000) % 60
                     val minutes = (elapsed / 1000) / 60
                     val timeText = String.format("%02d:%02d", minutes, seconds)
-                    
+
+                    _recordingState.value = _recordingState.value.copy(
+                        recordingTime = timeText
+                    )
+
                     val notificationManager = getSystemService(NotificationManager::class.java)
                     val notification = NotificationCompat.Builder(this@ScreenRecordService, CHANNEL_ID)
                         .setContentTitle(getString(R.string.recording_title))
@@ -955,7 +966,7 @@ class ScreenRecordService : Service() {
                         .setOngoing(true)
                         .setSilent(true)
                         .build()
-                    
+
                     notificationManager.notify(NOTIFICATION_ID, notification)
                     handler.postDelayed(this, 1000)
                 }
@@ -972,6 +983,7 @@ class ScreenRecordService : Service() {
         }
 
         isRecording = false
+        _recordingState.value = RecordingState()
         notificationUpdateRunnable?.let { handler.removeCallbacks(it) }
 
         val tempFile = outputFile
@@ -1079,9 +1091,7 @@ class ScreenRecordService : Service() {
         outputFile = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        
-        recordingCallback?.onRecordingStopped()
-        
+
         return savedFile
     }
     
