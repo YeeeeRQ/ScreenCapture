@@ -103,24 +103,6 @@ class FloatingView private constructor(private val context: Context) : ScreenRec
         }
     }
 
-    private fun onRecordingStarted() {
-        Log.d(TAG, "onRecordingStarted callback")
-        _isRecording = true
-        updateView()
-    }
-
-    private fun onRecordingStopped() {
-        Log.d(TAG, "onRecordingStopped callback")
-        _isRecording = false
-        updateView()
-    }
-
-    private fun onRecordingError(error: String) {
-        Log.d(TAG, "onRecordingError: $error")
-        _isRecording = false
-        updateView()
-    }
-    
     private fun startServiceRetryTimer() {
         if (serviceRetryHandler == null) {
             serviceRetryHandler = Handler(Looper.getMainLooper())
