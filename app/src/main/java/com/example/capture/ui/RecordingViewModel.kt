@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.capture.helper.PermissionHelper
+import com.example.capture.helper.PermissionManager
 import com.example.capture.helper.SettingsManager
 import com.example.capture.service.RecordingServiceInterface
 import com.example.capture.service.ScreenRecordService
@@ -118,7 +119,9 @@ class RecordingViewModel(
                 is RecordingIntent.RequestOverlayPermission -> handleRequestOverlayPermission()
                 is RecordingIntent.RequestNotificationPermission -> handleRequestNotificationPermission()
                 is RecordingIntent.RequestStoragePermission -> handleRequestStoragePermission()
+                is RecordingIntent.RequestAllPermissions -> handleRequestAllPermissions()
                 is RecordingIntent.RefreshPermissions -> handleRefreshPermissions()
+                is RecordingIntent.PermissionStepCompleted -> handlePermissionStepCompleted()
             }
         }
     }
@@ -191,7 +194,57 @@ class RecordingViewModel(
     }
 
     private fun handleRefreshPermissions() {
-        _uiState.update { it.copy(hasPermissions = PermissionHelper.hasAllPermissions(context)) }
+        _uiState.update {
+            it.copy(
+                hasPermissions = PermissionHelper.hasAllPermissions(context),
+                permissionGuidePending = PermissionManager.PermissionStep.NONE
+            )
+        }
+    }
+
+    private fun handleRequestAllPermissions() {
+        val status = PermissionManager.getPermissionStatus(context)
+        _uiState.update { it.copy(permissionGuidePending = status.nextStep) }
+    }
+
+    private suspend fun handlePermissionStepCompleted() {
+        val currentStep = _uiState.value.permissionGuidePending
+        if (currentStep == PermissionManager.PermissionStep.NONE) return
+
+        when (currentStep) {
+            PermissionManager.PermissionStep.OVERLAY -> {
+                if (!PermissionManager.hasNotificationPermission(context)) {
+                    _uiState.update { it.copy(permissionGuidePending = PermissionManager.PermissionStep.NOTIFICATION) }
+                    _uiEvent.emit(RecordingUiEvent.RequestNotificationPermission)
+                    return
+                }
+            }
+            PermissionManager.PermissionStep.NOTIFICATION -> {
+                if (!PermissionManager.hasManageStoragePermission(context)) {
+                    _uiState.update { it.copy(permissionGuidePending = PermissionManager.PermissionStep.STORAGE) }
+                    _uiEvent.emit(RecordingUiEvent.RequestStoragePermission)
+                    return
+                }
+            }
+            PermissionManager.PermissionStep.STORAGE -> {
+                _uiState.update {
+                    it.copy(
+                        hasPermissions = PermissionHelper.hasAllPermissions(context),
+                        permissionGuidePending = PermissionManager.PermissionStep.COMPLETE
+                    )
+                }
+                return
+            }
+            else -> {}
+        }
+
+        val status = PermissionManager.getPermissionStatus(context)
+        _uiState.update {
+            it.copy(
+                hasPermissions = status.allGranted,
+                permissionGuidePending = if (status.allGranted) PermissionManager.PermissionStep.COMPLETE else it.permissionGuidePending
+            )
+        }
     }
 
     fun saveProjectionData(resultCode: Int, data: Intent) {

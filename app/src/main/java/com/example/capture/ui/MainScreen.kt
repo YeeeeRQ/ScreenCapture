@@ -26,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +39,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.capture.R
-import com.example.capture.helper.PermissionHelper
+import com.example.capture.helper.PermissionManager
 import com.example.capture.helper.SettingsManager
 
 @Composable
@@ -49,6 +50,36 @@ fun MainScreen(
     val context = LocalContext.current
     var showModeDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showPermissionGuide by remember { mutableStateOf(false) }
+
+    if (showPermissionGuide) {
+        PermissionGuideDialog(
+            onRequestAllPermissions = {
+                onIntent(RecordingIntent.RequestAllPermissions)
+            },
+            onDismiss = {
+                showPermissionGuide = false
+            }
+        )
+    }
+
+    LaunchedEffect(uiState.permissionGuidePending) {
+        when (uiState.permissionGuidePending) {
+            PermissionManager.PermissionStep.OVERLAY -> {
+                onIntent(RecordingIntent.RequestOverlayPermission)
+            }
+            PermissionManager.PermissionStep.NOTIFICATION -> {
+                onIntent(RecordingIntent.RequestNotificationPermission)
+            }
+            PermissionManager.PermissionStep.STORAGE -> {
+                onIntent(RecordingIntent.RequestStoragePermission)
+            }
+            PermissionManager.PermissionStep.COMPLETE -> {
+                showPermissionGuide = false
+            }
+            else -> {}
+        }
+    }
 
     if (showModeDialog) {
         AlertDialog(
@@ -217,27 +248,14 @@ fun MainScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             if (!uiState.hasPermissions) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Button(
-                        onClick = { onIntent(RecordingIntent.RequestOverlayPermission) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3D3D5C))
-                    ) {
-                        Text("获取悬浮窗权限")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { onIntent(RecordingIntent.RequestNotificationPermission) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3D3D5C))
-                    ) {
-                        Text("获取通知权限")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { onIntent(RecordingIntent.RequestStoragePermission) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3D3D5C))
-                    ) {
-                        Text("获取存储权限")
-                    }
+                Button(
+                    onClick = { showPermissionGuide = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B7BDB))
+                ) {
+                    Text("一键获取所有权限", color = Color.White)
                 }
             } else {
                 Button(

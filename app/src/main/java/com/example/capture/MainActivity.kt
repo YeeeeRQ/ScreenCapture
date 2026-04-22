@@ -139,6 +139,8 @@ class MainActivity : ComponentActivity() {
             is RecordingUiEvent.RequestStoragePermission -> {
                 PermissionHelper.requestManageStoragePermission(this)
             }
+            is RecordingUiEvent.RequestAllPermissions -> {
+            }
             is RecordingUiEvent.ShowToast -> {
                 Toast.makeText(this, event.message, Toast.LENGTH_SHORT).show()
             }
@@ -173,5 +175,18 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         viewModel.unbindService(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Log.d("ScreenRecord", "onResume: checking permission status...")
+        viewModel.processIntent(RecordingIntent.RefreshPermissions)
+
+        val currentStep = viewModel.uiState.value.permissionGuidePending
+        if (currentStep != com.example.capture.helper.PermissionManager.PermissionStep.NONE &&
+            currentStep != com.example.capture.helper.PermissionManager.PermissionStep.COMPLETE) {
+            Log.d("ScreenRecord", "Permission guide step completed: $currentStep, continuing...")
+            viewModel.processIntent(RecordingIntent.PermissionStepCompleted)
+        }
     }
 }
