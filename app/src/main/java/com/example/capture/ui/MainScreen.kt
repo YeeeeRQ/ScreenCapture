@@ -258,7 +258,7 @@ fun MainScreen(
                         .height(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B7BDB))
                 ) {
-                    Text("一键获取所有权限", color = Color.White)
+                    Text("权限获取", color = Color.White)
                 }
             } else {
                 Button(
