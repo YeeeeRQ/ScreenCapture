@@ -48,7 +48,7 @@ fun MainScreen(
     onIntent: (RecordingIntent) -> Unit
 ) {
     val context = LocalContext.current
-    var showModeDialog by remember { mutableStateOf(false) }
+    // var showModeDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showPermissionGuide by remember { mutableStateOf(false) }
 
@@ -84,7 +84,7 @@ fun MainScreen(
         }
     }
 
-    if (showModeDialog) {
+    /*if (showModeDialog) {
         AlertDialog(
             onDismissRequest = { showModeDialog = false },
             title = { Text("录制模式") },
@@ -119,7 +119,7 @@ fun MainScreen(
                 }
             }
         )
-    }
+    }*/
 
     if (showThemeDialog) {
         AlertDialog(
@@ -310,7 +310,7 @@ fun MainScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(
+                    /*Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -324,7 +324,7 @@ fun MainScreen(
                             Text("更改", color = Color(0xFF7B7BDB))
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))*/
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
