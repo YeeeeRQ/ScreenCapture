@@ -285,7 +285,6 @@ class ScreenRecordService : Service(), RecordingServiceInterface {
                 if (resultCode == Activity.RESULT_OK && data != null) {
                     saveProjectionData(resultCode, data)
                     startRecordingInternal(resultCode, data)
-
                     showFloatingView()
                 }
             }
@@ -314,13 +313,10 @@ class ScreenRecordService : Service(), RecordingServiceInterface {
     }
 
     private fun showFloatingView() {
+        Log.d(TAG, "showFloatingView() called")
         val prefs = getSharedPreferences("screen_record_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("floating_window_enabled", false)
-
-        if (!enabled) {
-            Log.d(TAG, "FloatingView is disabled, skipping show")
-            return
-        }
+        Log.d(TAG, "showFloatingView: enabled=$enabled")
 
         try {
             if (floatingView == null) {
@@ -328,7 +324,9 @@ class ScreenRecordService : Service(), RecordingServiceInterface {
             }
             floatingView?.let { fv ->
                 fv.setService(this)
-                fv.show()
+                if (enabled) {
+                    fv.show()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing FloatingView: ${e.message}")

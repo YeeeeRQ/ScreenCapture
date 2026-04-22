@@ -85,6 +85,11 @@ class FloatingView private constructor(private val context: Context) : Recording
         if (service != null) {
             stopServiceRetryTimer()
             service.addRecordingStateListener(this)
+
+            if (floatingImage == null && floatingView != null) {
+                show()
+            }
+
             val state = service.recordingState.value
             _isRecording = state.isRecording
             _isTakingScreenshot = state.isTakingScreenshot
@@ -92,13 +97,19 @@ class FloatingView private constructor(private val context: Context) : Recording
             if (_isRecording) {
                 updateRecordingTime(state.recordingTime)
             }
-            Log.d(TAG, "Service set successfully, isRecording=$_isRecording")
         }
     }
 
     override fun onRecordingStateChanged(state: RecordingState) {
+        Log.d(TAG, "onRecordingStateChanged: isRecording=${state.isRecording}, floatingImage=${floatingImage != null}")
         _isRecording = state.isRecording
         _isTakingScreenshot = state.isTakingScreenshot
+
+        if (floatingImage == null && floatingView != null) {
+            Log.d(TAG, "Calling show() from onRecordingStateChanged")
+            show()
+        }
+
         updateView()
         if (state.isRecording) {
             updateRecordingTime(state.recordingTime)
@@ -126,26 +137,35 @@ class FloatingView private constructor(private val context: Context) : Recording
     }
     
     fun show() {
-        if (floatingView == null) {
+        val shouldReinitialize = floatingView == null || floatingImage == null
+        Log.d(TAG, "show() called: shouldReinitialize=$shouldReinitialize, floatingView=${floatingView != null}, floatingImage=${floatingImage != null}")
+
+        if (shouldReinitialize) {
+            floatingView?.let { oldView ->
+                try {
+                    windowManager.removeView(oldView)
+                    Log.d(TAG, "Removed old view from window")
+                } catch (e: Exception) {
+                    Log.d(TAG, "Could not remove old view: ${e.message}")
+                }
+            }
+            floatingView = null
+
             val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
             floatingView = inflater.inflate(R.layout.floating_view, null)
             floatingImage = floatingView?.findViewById(R.id.floating_image)
             floatingScreenshot = floatingView?.findViewById(R.id.floating_screenshot)
             floatingScreenshotProgress = floatingView?.findViewById(R.id.floating_screenshot_progress)
             floatingTimeText = floatingView?.findViewById(R.id.floating_time)
-            
+            Log.d(TAG, "Inflated new view, floatingImage=${floatingImage != null}")
+
             floatingScreenshot?.setOnClickListener {
-                Log.d(TAG, "Screenshot button clicked!")
-                floatingScreenshot?.performHapticFeedback(
-                    android.view.HapticFeedbackConstants.VIRTUAL_KEY,
-                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                )
                 screenRecordService?.takeScreenshot()
             }
-            
+
             val savedX = prefs.getInt("position_x", 100)
             val savedY = prefs.getInt("position_y", 300)
-            
+
             params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -157,19 +177,20 @@ class FloatingView private constructor(private val context: Context) : Recording
                 x = savedX
                 y = savedY
             }
-            
+
             floatingView?.setOnTouchListener(touchListener)
             floatingView?.isClickable = true
             floatingView?.isFocusable = true
-            
-            updateView()
         }
-        
+
+        updateView()
+
         floatingView?.let { view ->
             try {
                 windowManager.addView(view, params)
+                Log.d(TAG, "View added to window manager")
             } catch (e: Exception) {
-                Log.d(TAG, "View may already be added: ${e.message}")
+                Log.e(TAG, "Failed to add view: ${e.message}")
             }
         }
     }
@@ -189,7 +210,7 @@ class FloatingView private constructor(private val context: Context) : Recording
         floatingImage?.setImageResource(iconRes)
         floatingImage?.setColorFilter(Color.WHITE)
         floatingTimeText?.visibility = if (_isRecording) View.VISIBLE else View.GONE
-        
+
         if (_isRecording) {
             if (_isTakingScreenshot) {
                 floatingScreenshot?.visibility = View.GONE
