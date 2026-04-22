@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,16 +25,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+data class PermissionItemData(
+    val title: String,
+    val description: String,
+    val isGranted: Boolean
+)
+
 @Composable
 fun PermissionGuideDialog(
-    onRequestAllPermissions: () -> Unit,
+    hasOverlay: Boolean,
+    hasNotification: Boolean,
+    hasStorage: Boolean,
+    onStartGuide: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val items = listOf(
+        PermissionItemData("悬浮窗权限", "用于显示录制控制按钮", hasOverlay),
+        PermissionItemData("通知权限", "用于接收录制完成提示", hasNotification),
+        PermissionItemData("存储权限", "用于保存录制的视频文件", hasStorage)
+    )
+
+    val grantedCount = items.count { it.isGranted }
+    val totalCount = items.size
+    val allGranted = grantedCount == totalCount
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "需要以下权限",
+                text = "权限获取 ($grantedCount/$totalCount)",
                 fontWeight = FontWeight.Bold,
                 fontSize = 20.sp
             )
@@ -46,48 +64,45 @@ fun PermissionGuideDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "请授予以下权限以确保应用正常运行：",
+                    text = if (allGranted) "所有权限已获取！" else "请依次获取以下权限：",
                     fontSize = 14.sp,
-                    color = Color.Gray
+                    color = if (allGranted) Color(0xFF4CAF50) else Color.Gray
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                PermissionItem(
-                    emoji = "🎯",
-                    title = "悬浮窗权限",
-                    description = "用于显示录制控制按钮"
-                )
-
-                PermissionItem(
-                    emoji = "🔔",
-                    title = "通知权限",
-                    description = "用于接收录制完成提示"
-                )
-
-                PermissionItem(
-                    emoji = "📁",
-                    title = "存储权限",
-                    description = "用于保存录制的视频文件"
-                )
+                items.forEach { item ->
+                    PermissionItem(item)
+                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    onDismiss()
-                    onRequestAllPermissions()
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF7B7BDB)
-                )
-            ) {
-                Text("一键获取所有权限")
+            if (allGranted) {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50)
+                    )
+                ) {
+                    Text("完成")
+                }
+            } else {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onStartGuide()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF7B7BDB)
+                    )
+                ) {
+                    Text("开始引导")
+                }
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("稍后")
+                Text("关闭")
             }
         },
         shape = RoundedCornerShape(16.dp)
@@ -95,43 +110,42 @@ fun PermissionGuideDialog(
 }
 
 @Composable
-private fun PermissionItem(
-    emoji: String,
-    title: String,
-    description: String
-) {
+private fun PermissionItem(item: PermissionItemData) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                color = Color(0xFFF5F5F5),
+                color = if (item.isGranted) Color(0xFFE8F5E9) else Color(0xFFF5F5F5),
                 shape = RoundedCornerShape(8.dp)
             )
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = emoji,
-            fontSize = 24.sp,
+            text = if (item.isGranted) "✓" else "○",
+            fontSize = 20.sp,
+            color = if (item.isGranted) Color(0xFF4CAF50) else Color.Gray,
             modifier = Modifier
                 .size(40.dp)
                 .background(
-                    color = Color(0xFF7B7BDB).copy(alpha = 0.1f),
+                    color = if (item.isGranted) Color(0xFF4CAF50).copy(alpha = 0.1f) else Color.Gray.copy(alpha = 0.1f),
                     shape = CircleShape
                 )
-                .padding(8.dp)
+                .padding(8.dp),
+            fontWeight = FontWeight.Bold
         )
 
         Spacer(modifier = Modifier.width(12.dp))
 
         Column {
             Text(
-                text = title,
+                text = item.title,
                 fontWeight = FontWeight.Medium,
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                color = if (item.isGranted) Color(0xFF4CAF50) else Color.Black
             )
             Text(
-                text = description,
+                text = item.description,
                 fontSize = 12.sp,
                 color = Color.Gray
             )

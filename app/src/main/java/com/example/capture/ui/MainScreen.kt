@@ -54,7 +54,10 @@ fun MainScreen(
 
     if (showPermissionGuide) {
         PermissionGuideDialog(
-            onRequestAllPermissions = {
+            hasOverlay = uiState.hasOverlayPermission,
+            hasNotification = uiState.hasNotificationPermission,
+            hasStorage = uiState.hasStoragePermission,
+            onStartGuide = {
                 onIntent(RecordingIntent.RequestAllPermissions)
             },
             onDismiss = {

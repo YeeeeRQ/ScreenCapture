@@ -194,9 +194,13 @@ class RecordingViewModel(
     }
 
     private fun handleRefreshPermissions() {
+        val status = PermissionManager.getPermissionStatus(context)
         _uiState.update {
             it.copy(
-                hasPermissions = PermissionHelper.hasAllPermissions(context),
+                hasPermissions = status.allGranted,
+                hasOverlayPermission = status.hasOverlay,
+                hasNotificationPermission = status.hasNotification,
+                hasStoragePermission = status.hasStorage,
                 permissionGuidePending = PermissionManager.PermissionStep.NONE
             )
         }

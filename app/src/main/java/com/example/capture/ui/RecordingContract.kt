@@ -13,7 +13,10 @@ data class RecordingUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val isTakingScreenshot: Boolean = false,
-    val permissionGuidePending: PermissionManager.PermissionStep = PermissionManager.PermissionStep.NONE
+    val permissionGuidePending: PermissionManager.PermissionStep = PermissionManager.PermissionStep.NONE,
+    val hasOverlayPermission: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
+    val hasStoragePermission: Boolean = false
 )
 
 sealed class RecordingIntent {
