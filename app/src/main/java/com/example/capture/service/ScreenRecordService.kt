@@ -314,6 +314,14 @@ class ScreenRecordService : Service(), RecordingServiceInterface {
     }
 
     private fun showFloatingView() {
+        val prefs = getSharedPreferences("screen_record_prefs", Context.MODE_PRIVATE)
+        val enabled = prefs.getBoolean("floating_window_enabled", false)
+
+        if (!enabled) {
+            Log.d(TAG, "FloatingView is disabled, skipping show")
+            return
+        }
+
         try {
             if (floatingView == null) {
                 floatingView = FloatingView.getInstance(applicationContext)
