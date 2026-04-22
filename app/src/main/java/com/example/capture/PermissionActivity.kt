@@ -8,9 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
 import com.example.capture.service.ScreenRecordService
 
 class PermissionActivity : Activity() {
@@ -36,36 +33,9 @@ class PermissionActivity : Activity() {
             WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
         )
 
-        setupUI()
-
         Log.d(TAG, "PermissionActivity created")
 
         requestMediaProjectionPermission()
-    }
-
-    private fun setupUI() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFF5F5F5.toInt())
-            gravity = android.view.Gravity.CENTER
-            setPadding(48, 48, 48, 48)
-        }
-
-        val message = TextView(this).apply {
-            text = "正在请求屏幕录制权限..."
-            textSize = 18f
-            setTextColor(0xFF333333.toInt())
-            gravity = android.view.Gravity.CENTER
-        }
-
-        val progress = ProgressBar(this).apply {
-            isIndeterminate = true
-        }
-
-        layout.addView(progress)
-        layout.addView(message)
-
-        setContentView(layout)
     }
 
     private fun requestMediaProjectionPermission() {
